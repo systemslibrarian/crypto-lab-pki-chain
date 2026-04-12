@@ -131,65 +131,69 @@ function exhibitsMarkup(state: AppState): string {
   }[state.pqMode];
 
   return `
-    <header class="hero panel">
-      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
-        ${state.theme === 'dark' ? 'Light' : 'Dark'}
+    <header class="hero panel" role="banner">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
+        <span aria-hidden="true">${state.theme === 'dark' ? '☀️' : '🌙'}</span>
+        <span class="sr-only">${state.theme === 'dark' ? 'Light' : 'Dark'} mode</span>
       </button>
-      <p class="eyebrow">crypto-lab interactive exhibit</p>
+      <p class="eyebrow" aria-hidden="true">crypto-lab interactive exhibit</p>
       <h1>PKI Chain, Trust, and CT</h1>
       <p class="lede">Explore certificate chain trust, CA failure blast radius, and Certificate Transparency monitoring in one browser-native lab.</p>
     </header>
 
-    <section class="panel exhibit" id="exhibit-1">
-      <h2>Exhibit 1 - The Chain</h2>
-      <p class="caption">Root CA -> Intermediate CA -> Leaf certificate with trust propagation from anchor to endpoint.</p>
-      <div class="chain-row ${chainTrusted ? 'trust-flow-on' : ''}">
-        <button type="button" class="cert-chip ${state.selectedNode === 'root' ? 'active' : ''} ${compromiseSet.has(state.chain.root.cert.subject) ? 'compromised' : ''}" data-select="root">Root CA</button>
-        <span class="arrow">-></span>
-        <button type="button" class="cert-chip ${state.selectedNode === 'intermediate' ? 'active' : ''} ${compromiseSet.has(state.chain.intermediate.cert.subject) ? 'compromised' : ''}" data-select="intermediate">Intermediate</button>
-        <span class="arrow">-></span>
-        <button type="button" class="cert-chip ${state.selectedNode === 'leaf' ? 'active' : ''} ${compromiseSet.has(state.chain.leaf.cert.subject) ? 'compromised' : ''}" data-select="leaf">Leaf</button>
+    <section class="panel exhibit" id="exhibit-1" aria-labelledby="ex1-heading">
+      <h2 id="ex1-heading">Exhibit 1 &mdash; The Chain</h2>
+      <p class="caption">Root CA &rarr; Intermediate CA &rarr; Leaf certificate with trust propagation from anchor to endpoint.</p>
+      <div class="chain-row ${chainTrusted ? 'trust-flow-on' : ''}" role="group" aria-label="Certificate chain">
+        <button type="button" class="cert-chip ${state.selectedNode === 'root' ? 'active' : ''} ${compromiseSet.has(state.chain.root.cert.subject) ? 'compromised' : ''}" data-select="root" aria-pressed="${state.selectedNode === 'root'}" aria-label="Root CA certificate${compromiseSet.has(state.chain.root.cert.subject) ? ', compromised' : ''}">Root CA</button>
+        <span class="arrow" aria-hidden="true">&rarr;</span>
+        <button type="button" class="cert-chip ${state.selectedNode === 'intermediate' ? 'active' : ''} ${compromiseSet.has(state.chain.intermediate.cert.subject) ? 'compromised' : ''}" data-select="intermediate" aria-pressed="${state.selectedNode === 'intermediate'}" aria-label="Intermediate CA certificate${compromiseSet.has(state.chain.intermediate.cert.subject) ? ', compromised' : ''}">Intermediate</button>
+        <span class="arrow" aria-hidden="true">&rarr;</span>
+        <button type="button" class="cert-chip ${state.selectedNode === 'leaf' ? 'active' : ''} ${compromiseSet.has(state.chain.leaf.cert.subject) ? 'compromised' : ''}" data-select="leaf" aria-pressed="${state.selectedNode === 'leaf'}" aria-label="Leaf certificate${compromiseSet.has(state.chain.leaf.cert.subject) ? ', compromised' : ''}">Leaf</button>
       </div>
-      <div class="cert-inspector">
-        <p><strong>Subject:</strong> ${selected.subject}</p>
-        <p><strong>Issuer:</strong> ${selected.issuer}</p>
-        <p><strong>Serial:</strong> <span class="mono">${selected.serialNumber}</span></p>
-        <p><strong>Validity:</strong> ${new Date(selected.validFrom).toLocaleDateString()} - ${new Date(selected.validTo).toLocaleDateString()}</p>
-        <p><strong>Public Key Type:</strong> ${selected.publicKey.kty ?? 'unknown'} / ${(selected.publicKey.crv ?? selected.publicKey.alg ?? 'n/a')}</p>
-        <p><strong>Signature Size:</strong> ${signatureBytes} bytes</p>
+      <div class="cert-inspector" role="region" aria-label="Certificate details for ${state.selectedNode}" aria-live="polite">
+        <dl class="cert-fields">
+          <dt>Subject</dt><dd>${selected.subject}</dd>
+          <dt>Issuer</dt><dd>${selected.issuer}</dd>
+          <dt>Serial</dt><dd><span class="mono">${selected.serialNumber}</span></dd>
+          <dt>Validity</dt><dd>${new Date(selected.validFrom).toLocaleDateString()} &ndash; ${new Date(selected.validTo).toLocaleDateString()}</dd>
+          <dt>Public Key</dt><dd>${selected.publicKey.kty ?? 'unknown'} / ${(selected.publicKey.crv ?? selected.publicKey.alg ?? 'n/a')}</dd>
+          <dt>Signature Size</dt><dd>${signatureBytes} bytes</dd>
+        </dl>
       </div>
     </section>
 
-    <section class="panel exhibit" id="exhibit-2">
-      <h2>Exhibit 2 - Chain Validation</h2>
+    <section class="panel exhibit" id="exhibit-2" aria-labelledby="ex2-heading">
+      <h2 id="ex2-heading">Exhibit 2 &mdash; Chain Validation</h2>
       <p class="caption">Real WebCrypto signature verification at every link, plus trust anchor and revocation checks.</p>
-      <div class="control-row">
+      <div class="control-row" role="toolbar" aria-label="Validation controls">
         <button id="run-validation" class="btn" type="button">Run Validation</button>
-        <button class="btn ghost" data-tamper="root" type="button">Tamper Root</button>
-        <button class="btn ghost" data-tamper="intermediate" type="button">Tamper Intermediate</button>
-        <button class="btn ghost" data-tamper="leaf" type="button">Tamper Leaf</button>
+        <button class="btn ghost" data-tamper="root" type="button" aria-label="Tamper with root certificate">Tamper Root</button>
+        <button class="btn ghost" data-tamper="intermediate" type="button" aria-label="Tamper with intermediate certificate">Tamper Intermediate</button>
+        <button class="btn ghost" data-tamper="leaf" type="button" aria-label="Tamper with leaf certificate">Tamper Leaf</button>
       </div>
-      <div class="control-row">
+      <fieldset class="control-row revocation-fieldset">
+        <legend class="sr-only">Revocation simulation</legend>
         <label><input id="toggle-crl" type="checkbox" ${state.revokeViaCrl ? 'checked' : ''} /> Simulate CRL revocation</label>
         <label><input id="toggle-ocsp" type="checkbox" ${state.revokeViaOcsp ? 'checked' : ''} /> Simulate OCSP revoked</label>
-      </div>
-      <ul class="step-list">
+      </fieldset>
+      <ul class="step-list" aria-label="Validation steps" role="list">
         ${(state.validation?.steps ?? [])
           .map(
-            (step) => `<li class="${step.ok ? 'pass' : 'fail'}"><strong>${step.label}:</strong> ${step.details}</li>`,
+            (step) => `<li class="${step.ok ? 'pass' : 'fail'}" aria-label="${step.label}: ${step.ok ? 'passed' : 'failed'}"><strong>${step.label}:</strong> ${step.details}</li>`,
           )
           .join('')}
       </ul>
-      <p class="status ${state.validation?.ok ? 'pass' : 'fail'}">Overall: ${state.validation?.ok ? 'PASS' : 'FAIL'}</p>
+      <p class="status ${state.validation?.ok ? 'pass' : 'fail'}" role="status" aria-live="polite">Overall: ${state.validation?.ok ? 'PASS' : 'FAIL'}</p>
     </section>
 
-    <section class="panel exhibit" id="exhibit-3">
-      <h2>Exhibit 3 - Trust Stores</h2>
+    <section class="panel exhibit" id="exhibit-3" aria-labelledby="ex3-heading">
+      <h2 id="ex3-heading">Exhibit 3 &mdash; Trust Stores</h2>
       <p class="caption">The same chain can be accepted or rejected depending on browser, OS, or app trust roots.</p>
-      <div class="tab-row">
-        <button class="tab ${state.trustContext === 'browser' ? 'active' : ''}" data-context="browser" type="button">Browser Store</button>
-        <button class="tab ${state.trustContext === 'os' ? 'active' : ''}" data-context="os" type="button">OS Store</button>
-        <button class="tab ${state.trustContext === 'application' ? 'active' : ''}" data-context="application" type="button">Application Store</button>
+      <div class="tab-row" role="tablist" aria-label="Trust store context">
+        <button class="tab ${state.trustContext === 'browser' ? 'active' : ''}" data-context="browser" type="button" role="tab" aria-selected="${state.trustContext === 'browser'}">Browser Store</button>
+        <button class="tab ${state.trustContext === 'os' ? 'active' : ''}" data-context="os" type="button" role="tab" aria-selected="${state.trustContext === 'os'}">OS Store</button>
+        <button class="tab ${state.trustContext === 'application' ? 'active' : ''}" data-context="application" type="button" role="tab" aria-selected="${state.trustContext === 'application'}">Application Store</button>
       </div>
       <p>Current context: <strong>${state.trustContext}</strong></p>
       <p>Root fingerprint: <span class="mono">${shortHex(state.rootFingerprint, 18)}</span></p>
@@ -201,16 +205,16 @@ function exhibitsMarkup(state: AppState): string {
       </div>
     </section>
 
-    <section class="panel exhibit" id="exhibit-4">
-      <h2>Exhibit 4 - CA Compromise</h2>
+    <section class="panel exhibit" id="exhibit-4" aria-labelledby="ex4-heading">
+      <h2 id="ex4-heading">Exhibit 4 &mdash; CA Compromise</h2>
       <p class="caption">Mark a CA as compromised and observe cascading distrust across its issued subtree.</p>
-      <div class="tab-row">
-        <button class="tab ${state.compromisedCa === null ? 'active' : ''}" data-compromise="none" type="button">No Compromise</button>
-        <button class="tab ${state.compromisedCa === 'intermediate' ? 'active' : ''}" data-compromise="intermediate" type="button">Intermediate Compromised</button>
-        <button class="tab ${state.compromisedCa === 'root' ? 'active' : ''}" data-compromise="root" type="button">Root Compromised</button>
+      <div class="tab-row" role="tablist" aria-label="Compromise scenario">
+        <button class="tab ${state.compromisedCa === null ? 'active' : ''}" data-compromise="none" type="button" role="tab" aria-selected="${state.compromisedCa === null}">No Compromise</button>
+        <button class="tab ${state.compromisedCa === 'intermediate' ? 'active' : ''}" data-compromise="intermediate" type="button" role="tab" aria-selected="${state.compromisedCa === 'intermediate'}">Intermediate Compromised</button>
+        <button class="tab ${state.compromisedCa === 'root' ? 'active' : ''}" data-compromise="root" type="button" role="tab" aria-selected="${state.compromisedCa === 'root'}">Root Compromised</button>
       </div>
       <p>Untrusted subtree:</p>
-      <ul class="subtree-list">
+      <ul class="subtree-list" aria-live="polite">
         <li class="${compromiseSet.has(state.chain.root.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.root.cert.subject)}</li>
         <li class="${compromiseSet.has(state.chain.intermediate.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.intermediate.cert.subject)}</li>
         <li class="${compromiseSet.has(state.chain.leaf.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.leaf.cert.subject)}</li>
@@ -218,8 +222,8 @@ function exhibitsMarkup(state: AppState): string {
       <p class="incident-note"><strong>DigiNotar 2011:</strong> attacker-issued fraudulent certificates (including google.com), prompting browser vendors to distrust the CA and break trust for all descendants.</p>
     </section>
 
-    <section class="panel exhibit" id="exhibit-5">
-      <h2>Exhibit 5 - Certificate Transparency</h2>
+    <section class="panel exhibit" id="exhibit-5" aria-labelledby="ex5-heading">
+      <h2 id="ex5-heading">Exhibit 5 &mdash; Certificate Transparency</h2>
       <p class="caption">Submit certificates to a simulated append-only log, mint SCTs, verify inclusion, and catch misissuance.</p>
       <div class="control-row">
         <button id="ct-submit" class="btn" type="button">Submit Leaf to CT Log</button>
@@ -231,17 +235,17 @@ function exhibitsMarkup(state: AppState): string {
       <p>SCT: ${state.latestSct ? `<span class="mono">${shortHex(state.latestSct.entryHash, 14)}</span> at ${new Date(state.latestSct.timestamp).toLocaleTimeString()}` : 'No SCT generated yet.'}</p>
       <p>Inclusion proof: ${state.latestProof ? `${state.latestProof.auditPath.length} sibling hashes, verify=${state.latestProofValid ? 'true' : 'false'}` : 'Not generated.'}</p>
       <p>Consistency proof: ${state.latestConsistency ? `old=${state.latestConsistency.oldSize}, new=${state.latestConsistency.newSize}, verify=${state.latestConsistencyValid ? 'true' : 'false'}` : 'Not generated.'}</p>
-      <p class="status ${state.misissuance?.suspicious ? 'fail' : 'pass'}">Misissuance monitor: ${state.misissuance ? state.misissuance.reason : 'No suspicious issuance observed.'}</p>
+      <p class="status ${state.misissuance?.suspicious ? 'fail' : 'pass'}" role="status" aria-live="polite">Misissuance monitor: ${state.misissuance ? state.misissuance.reason : 'No suspicious issuance observed.'}</p>
       <p class="incident-note">CT bridge: Merkle proofs from this panel mirror the trust model used by public browser CT logs.</p>
     </section>
 
-    <section class="panel exhibit" id="exhibit-6">
-      <h2>Exhibit 6 - PQ Migration</h2>
+    <section class="panel exhibit" id="exhibit-6" aria-labelledby="ex6-heading">
+      <h2 id="ex6-heading">Exhibit 6 &mdash; PQ Migration</h2>
       <p class="caption">Compare classical and post-quantum certificate chain signatures and migration strategy.</p>
-      <div class="tab-row">
-        <button class="tab ${state.pqMode === 'classical' ? 'active' : ''}" data-pq="classical" type="button">P-256</button>
-        <button class="tab ${state.pqMode === 'mldsa' ? 'active' : ''}" data-pq="mldsa" type="button">ML-DSA</button>
-        <button class="tab ${state.pqMode === 'hybrid' ? 'active' : ''}" data-pq="hybrid" type="button">Hybrid</button>
+      <div class="tab-row" role="tablist" aria-label="Post-quantum algorithm selection">
+        <button class="tab ${state.pqMode === 'classical' ? 'active' : ''}" data-pq="classical" type="button" role="tab" aria-selected="${state.pqMode === 'classical'}">P-256</button>
+        <button class="tab ${state.pqMode === 'mldsa' ? 'active' : ''}" data-pq="mldsa" type="button" role="tab" aria-selected="${state.pqMode === 'mldsa'}">ML-DSA</button>
+        <button class="tab ${state.pqMode === 'hybrid' ? 'active' : ''}" data-pq="hybrid" type="button" role="tab" aria-selected="${state.pqMode === 'hybrid'}">Hybrid</button>
       </div>
       <h3>${pqInfo.title}</h3>
       <p><strong>Algorithm:</strong> ${pqInfo.alg}</p>
@@ -251,8 +255,8 @@ function exhibitsMarkup(state: AppState): string {
       <p class="incident-note">Compatibility note: browsers currently validate classical WebPKI signatures; PQ rollouts are expected to use hybrid certificates first.</p>
     </section>
 
-    <footer class="panel footer-note">
-      <p>So whether you eat or drink or whatever you do, do it all for the glory of God. - 1 Corinthians 10:31</p>
+    <footer class="panel footer-note" role="contentinfo">
+      <p>So whether you eat or drink or whatever you do, do it all for the glory of God. &mdash; 1 Corinthians 10:31</p>
     </footer>
   `;
 }
