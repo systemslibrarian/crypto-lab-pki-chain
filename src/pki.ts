@@ -85,6 +85,19 @@ function certToBeSigned(cert: Omit<Certificate, 'signature'>): string {
   });
 }
 
+function unsignedCertificatePayload(cert: Certificate): Uint8Array {
+  return new TextEncoder().encode(
+    certToBeSigned({
+      subject: cert.subject,
+      issuer: cert.issuer,
+      publicKey: cert.publicKey,
+      validFrom: cert.validFrom,
+      validTo: cert.validTo,
+      serialNumber: cert.serialNumber,
+    }),
+  );
+}
+
 async function signCertificate(
   unsignedCert: Omit<Certificate, 'signature'>,
   issuerPrivateKey: CryptoKey,
@@ -101,16 +114,7 @@ async function verifyCertificateSignature(
   cert: Certificate,
   issuerPublicKey: CryptoKey,
 ): Promise<boolean> {
-  const payload = new TextEncoder().encode(
-    certToBeSigned({
-      subject: cert.subject,
-      issuer: cert.issuer,
-      publicKey: cert.publicKey,
-      validFrom: cert.validFrom,
-      validTo: cert.validTo,
-      serialNumber: cert.serialNumber,
-    }),
-  );
+  const payload = unsignedCertificatePayload(cert);
 
   return crypto.subtle.verify(SIGN_PARAMS, issuerPublicKey, cert.signature, payload);
 }
@@ -200,13 +204,7 @@ export async function createDemoChain(): Promise<CertificateChain> {
 }
 
 export async function createTrustStore(rootCert: Certificate): Promise<TrustStore> {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(certToBeSigned({ ...rootCert, signature: undefined as never } as Omit<
-      Certificate,
-      'signature'
-    >)),
-  );
+  const digest = await crypto.subtle.digest('SHA-256', unsignedCertificatePayload(rootCert));
 
   return {
     trustedRoots: new Set([b64UrlEncode(digest)]),
@@ -214,16 +212,7 @@ export async function createTrustStore(rootCert: Certificate): Promise<TrustStor
 }
 
 export async function trustAnchorFingerprint(rootCert: Certificate): Promise<string> {
-  const payload = new TextEncoder().encode(
-    certToBeSigned({
-      subject: rootCert.subject,
-      issuer: rootCert.issuer,
-      publicKey: rootCert.publicKey,
-      validFrom: rootCert.validFrom,
-      validTo: rootCert.validTo,
-      serialNumber: rootCert.serialNumber,
-    }),
-  );
+  const payload = unsignedCertificatePayload(rootCert);
   const digest = await crypto.subtle.digest('SHA-256', payload);
   return b64UrlEncode(digest);
 }
