@@ -1,0 +1,62 @@
+:root {
+  --bg: #171a19;
+  --surface: #222826;
+  --text: #ece9dc;
+  --muted: #c2bca9;
+  --accent: #c89b43;
+  --font-body: 'IBM Plex Sans', 'Source Sans 3', sans-serif;
+  --font-display: 'Fraunces', 'Iowan Old Style', serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: radial-gradient(circle at 20% 0%, #2a2f2d, var(--bg) 60%);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero,
+.card {
+  border: 1px solid #49504d;
+  border-radius: 1rem;
+  background: linear-gradient(150deg, var(--surface), #1c201f);
+  padding: 1rem;
+}
+
+.eyebrow {
+  margin: 0;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+.lede {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
