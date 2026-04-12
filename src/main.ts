@@ -10,7 +10,7 @@ if (!app) {
 
 async function init(): Promise<void> {
   const chain = await createDemoChain();
-  const ct = createCtLog();
+  const ct = await createCtLog();
 
   app.innerHTML = `
     <main class="page">
