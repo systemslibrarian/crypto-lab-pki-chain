@@ -132,9 +132,8 @@ function exhibitsMarkup(state: AppState): string {
 
   return `
     <header class="hero panel" role="banner">
-      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
-        <span aria-hidden="true">${state.theme === 'dark' ? '☀️' : '🌙'}</span>
-        <span class="sr-only">${state.theme === 'dark' ? 'Light' : 'Dark'} mode</span>
+      <button id="theme-toggle" class="theme-toggle" type="button" style="position: absolute; top: 0; right: 0" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
+        <span aria-hidden="true">${state.theme === 'dark' ? '🌙' : '☀️'}</span>
       </button>
       <p class="eyebrow" aria-hidden="true">crypto-lab interactive exhibit</p>
       <h1>PKI Chain, Trust, and CT</h1>
@@ -266,7 +265,7 @@ function bindEvents(state: AppState): void {
   themeToggle?.addEventListener('click', () => {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = state.theme;
-    localStorage.setItem('crypto-lab-theme', state.theme);
+    localStorage.setItem('theme', state.theme);
     render(state);
   });
 
@@ -388,7 +387,7 @@ async function init(): Promise<void> {
   const osStore: TrustStore = { trustedRoots: new Set() };
   const appStore: TrustStore = { trustedRoots: new Set([rootFingerprint]) };
 
-  const theme = (localStorage.getItem('crypto-lab-theme') as Theme | null) ?? 'dark';
+  const theme = (localStorage.getItem('theme') as Theme | null) ?? 'dark';
   document.documentElement.dataset.theme = theme;
 
   const state: AppState = {
