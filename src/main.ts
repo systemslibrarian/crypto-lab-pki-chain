@@ -17,6 +17,7 @@ import {
   compromisedSubtree,
   type Certificate,
   type CertificateChain,
+  type SignedCertificate,
   type ValidationResult,
   type TrustStore,
   type CompromisedCa,
@@ -54,6 +55,8 @@ if (!app) {
   throw new Error('Missing app root element.');
 }
 
+const TAMPER_MARK = ' [tampered]';
+
 function shortHex(value: string, count = 12): string {
   return value.length > count * 2 ? `${value.slice(0, count)}...${value.slice(-count)}` : value;
 }
@@ -62,42 +65,132 @@ function shortSubject(value: string): string {
   return value.replace('CN=', '');
 }
 
-function certAt(state: AppState, node: CertNode): Certificate {
-  if (node === 'root') {
-    return state.chain.root.cert;
-  }
-  if (node === 'intermediate') {
-    return state.chain.intermediate.cert;
-  }
-  return state.chain.leaf.cert;
-}
-
-function mutateCertificateForTamper(cert: Certificate): Certificate {
+/** Apply a tamper to a certificate — flip a single signed field after issuance. */
+function applyTamper(cert: Certificate): Certificate {
   return {
     ...cert,
-    subject: `${cert.subject} [tampered]`,
+    subject: `${cert.subject}${TAMPER_MARK}`,
   };
 }
 
+function tamperedSigned(signed: SignedCertificate, on: boolean): SignedCertificate {
+  return on ? { ...signed, cert: applyTamper(signed.cert) } : signed;
+}
+
+/**
+ * The chain as the validator sees it: pristine certificates with any toggled
+ * tamper re-applied on top. The original `state.chain` is never mutated, so
+ * tampering is fully reversible and learners can flip PASS↔FAIL at will.
+ */
+function effectiveChain(state: AppState): CertificateChain {
+  return {
+    root: tamperedSigned(state.chain.root, state.tamperedNodes.has('root')),
+    intermediate: tamperedSigned(state.chain.intermediate, state.tamperedNodes.has('intermediate')),
+    leaf: tamperedSigned(state.chain.leaf, state.tamperedNodes.has('leaf')),
+  };
+}
+
+function certAt(state: AppState, node: CertNode): Certificate {
+  const chain = effectiveChain(state);
+  if (node === 'root') {
+    return chain.root.cert;
+  }
+  if (node === 'intermediate') {
+    return chain.intermediate.cert;
+  }
+  return chain.leaf.cert;
+}
+
 async function recomputeValidation(state: AppState): Promise<void> {
+  const chain = effectiveChain(state);
+
   const crls = state.revokeViaCrl
-    ? [createCrl(state.chain.leaf.cert.issuer, [state.chain.leaf.cert.serialNumber])]
+    ? [createCrl(chain.leaf.cert.issuer, [chain.leaf.cert.serialNumber])]
     : [];
 
   const ocsp = state.revokeViaOcsp
     ? [
-        createOcspResponder(state.chain.leaf.cert.issuer, [
-          { serialNumber: state.chain.leaf.cert.serialNumber, status: 'revoked' },
+        createOcspResponder(chain.leaf.cert.issuer, [
+          { serialNumber: chain.leaf.cert.serialNumber, status: 'revoked' },
         ]),
       ]
     : [];
 
   state.validation = await validateChain(
-    state.chain,
+    chain,
     state.trustStores[state.trustContext],
     crls,
     ocsp,
   );
+}
+
+interface PqProfile {
+  mode: PqMode;
+  label: string;
+  alg: string;
+  sigBytes: number;
+  keyBytes: number;
+  measured: boolean;
+  note: string;
+}
+
+function pqProfiles(state: AppState): PqProfile[] {
+  // Real, measured classical footprint from the live chain's leaf certificate.
+  const classicalSig = state.chain.leaf.cert.signature.byteLength;
+  const classicalKey = 65; // Uncompressed P-256 public point: 1 + 32 + 32 bytes.
+
+  // Post-quantum sizes are NIST FIPS 204 ML-DSA-44 reference values. WebCrypto
+  // cannot yet produce ML-DSA signatures, so these are stated, not generated.
+  const mldsaSig = 2420;
+  const mldsaKey = 1312;
+
+  return [
+    {
+      mode: 'classical',
+      label: 'ECDSA P-256',
+      alg: 'ECDSA P-256 / SHA-256',
+      sigBytes: classicalSig,
+      keyBytes: classicalKey,
+      measured: true,
+      note: 'Today’s WebPKI baseline. Tiny artifacts, universal browser and HSM support — but Shor’s algorithm breaks it once a cryptographically relevant quantum computer exists.',
+    },
+    {
+      mode: 'mldsa',
+      label: 'ML-DSA-44',
+      alg: 'ML-DSA-44 (FIPS 204, Dilithium family)',
+      sigBytes: mldsaSig,
+      keyBytes: mldsaKey,
+      measured: false,
+      note: 'Quantum-resistant lattice signatures. ~38× larger signatures inflate every handshake and certificate — the cost of post-quantum security.',
+    },
+    {
+      mode: 'hybrid',
+      label: 'P-256 + ML-DSA-44',
+      alg: 'Hybrid dual signature (classical + PQ)',
+      sigBytes: classicalSig + mldsaSig,
+      keyBytes: classicalKey + mldsaKey,
+      measured: false,
+      note: 'The expected migration path: a relying party that trusts either algorithm stays secure. Carries both signatures, so it is the largest — but it is safe even if one scheme is later broken.',
+    },
+  ];
+}
+
+function pqBarsMarkup(state: AppState): string {
+  const profiles = pqProfiles(state);
+  const maxSig = Math.max(...profiles.map((p) => p.sigBytes));
+
+  return profiles
+    .map((p) => {
+      const width = Math.max(2, Math.round((p.sigBytes / maxSig) * 100));
+      const active = state.pqMode === p.mode;
+      return `
+        <div class="pq-bar-row ${active ? 'active' : ''}">
+          <span class="pq-bar-label">${p.label}${p.measured ? ' <span class="pq-tag">measured</span>' : ''}</span>
+          <span class="pq-bar-track"><span class="pq-bar-fill" style="width: ${width}%"></span></span>
+          <span class="pq-bar-value mono">${p.sigBytes.toLocaleString()} B</span>
+        </div>`;
+    })
+    .join('');
 }
 
 function exhibitsMarkup(state: AppState): string {
@@ -105,39 +198,23 @@ function exhibitsMarkup(state: AppState): string {
   const compromiseSet = compromisedSubtree(state.chain, state.compromisedCa);
   const chainTrusted = state.validation?.ok ?? false;
   const signatureBytes = selected.signature.byteLength;
+  const tamperCount = state.tamperedNodes.size;
+  const activePq = pqProfiles(state).find((p) => p.mode === state.pqMode)!;
 
-  const pqInfo = {
-    classical: {
-      title: 'Classical P-256 Chain',
-      alg: 'ECDSA P-256',
-      sigBytes: '64-72 bytes',
-      keyBytes: '65 bytes public key',
-      note: 'Current web PKI baseline with broad browser and HSM support.',
-    },
-    mldsa: {
-      title: 'Post-Quantum ML-DSA Chain',
-      alg: 'ML-DSA (Dilithium family)',
-      sigBytes: '~2,420 bytes',
-      keyBytes: '~1,312 bytes public key',
-      note: 'Stronger against quantum adversaries but larger artifacts and ecosystem rollout risk.',
-    },
-    hybrid: {
-      title: 'Hybrid Transition Chain',
-      alg: 'ECDSA + ML-DSA dual signatures',
-      sigBytes: 'Classical + PQ total',
-      keyBytes: 'Dual key material',
-      note: 'Preferred migration path: maintain compatibility while adding PQ assurance.',
-    },
-  }[state.pqMode];
+  const tamperLabel = (node: CertNode, name: string): string =>
+    state.tamperedNodes.has(node) ? `Repair ${name}` : `Tamper ${name}`;
 
   return `
     <header class="hero panel" role="banner">
-      <button id="theme-toggle" class="theme-toggle" type="button" style="position: absolute; top: 0; right: 0" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
-        <span aria-hidden="true">${state.theme === 'dark' ? '🌙' : '☀️'}</span>
-      </button>
+      <div class="hero-actions">
+        <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset all lab scenarios to defaults"${tamperCount === 0 && !state.revokeViaCrl && !state.revokeViaOcsp && !state.compromisedCa && state.trustContext === 'browser' ? ' disabled' : ''}>Reset lab</button>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
+          <span aria-hidden="true">${state.theme === 'dark' ? '🌙' : '☀️'}</span>
+        </button>
+      </div>
       <p class="eyebrow" aria-hidden="true">crypto-lab interactive exhibit</p>
       <h1>PKI Chain, Trust, and CT</h1>
-      <p class="lede">Explore certificate chain trust, CA failure blast radius, and Certificate Transparency monitoring in one browser-native lab.</p>
+      <p class="lede">Explore certificate chain trust, CA failure blast radius, and Certificate Transparency monitoring in one browser-native lab. Every signature, hash, and Merkle proof here is computed live with <code>crypto.subtle</code> &mdash; nothing is faked.</p>
     </header>
 
     <section class="panel exhibit" id="exhibit-1" aria-labelledby="ex1-heading">
@@ -160,6 +237,7 @@ function exhibitsMarkup(state: AppState): string {
           <dt>Signature Size</dt><dd>${signatureBytes} bytes</dd>
         </dl>
       </div>
+      <p class="teach"><strong>How trust flows:</strong> each certificate carries the <em>subject</em>&rsquo;s public key, signed by its <em>issuer</em>&rsquo;s private key. The Root signs itself; it signs the Intermediate; the Intermediate signs the Leaf. Trust an anchor and you transitively trust everything it vouches for &mdash; until one signature fails to verify.</p>
     </section>
 
     <section class="panel exhibit" id="exhibit-2" aria-labelledby="ex2-heading">
@@ -167,9 +245,9 @@ function exhibitsMarkup(state: AppState): string {
       <p class="caption">Real WebCrypto signature verification at every link, plus trust anchor and revocation checks.</p>
       <div class="control-row" role="toolbar" aria-label="Validation controls">
         <button id="run-validation" class="btn" type="button">Run Validation</button>
-        <button class="btn ghost" data-tamper="root" type="button" aria-label="Tamper with root certificate">Tamper Root</button>
-        <button class="btn ghost" data-tamper="intermediate" type="button" aria-label="Tamper with intermediate certificate">Tamper Intermediate</button>
-        <button class="btn ghost" data-tamper="leaf" type="button" aria-label="Tamper with leaf certificate">Tamper Leaf</button>
+        <button class="btn ghost ${state.tamperedNodes.has('root') ? 'tampered' : ''}" data-tamper="root" type="button" aria-pressed="${state.tamperedNodes.has('root')}">${tamperLabel('root', 'Root')}</button>
+        <button class="btn ghost ${state.tamperedNodes.has('intermediate') ? 'tampered' : ''}" data-tamper="intermediate" type="button" aria-pressed="${state.tamperedNodes.has('intermediate')}">${tamperLabel('intermediate', 'Intermediate')}</button>
+        <button class="btn ghost ${state.tamperedNodes.has('leaf') ? 'tampered' : ''}" data-tamper="leaf" type="button" aria-pressed="${state.tamperedNodes.has('leaf')}">${tamperLabel('leaf', 'Leaf')}</button>
       </div>
       <fieldset class="control-row revocation-fieldset">
         <legend class="sr-only">Revocation simulation</legend>
@@ -184,6 +262,7 @@ function exhibitsMarkup(state: AppState): string {
           .join('')}
       </ul>
       <p class="status ${state.validation?.ok ? 'pass' : 'fail'}" role="status" aria-live="polite">Overall: ${state.validation?.ok ? 'PASS' : 'FAIL'}</p>
+      <p class="teach"><strong>Try it:</strong> a signature covers the exact bytes of the fields it signs. <em>Tamper</em> any certificate &mdash; this flips one signed field <em>after</em> issuance &mdash; and that link&rsquo;s signature check fails immediately, because the issuer never signed the altered bytes. Click again to <em>repair</em> and watch it pass. This is why an attacker cannot edit a certificate without the issuer&rsquo;s private key.</p>
     </section>
 
     <section class="panel exhibit" id="exhibit-3" aria-labelledby="ex3-heading">
@@ -196,7 +275,8 @@ function exhibitsMarkup(state: AppState): string {
       </div>
       <p>Current context: <strong>${state.trustContext}</strong></p>
       <p>Root fingerprint: <span class="mono">${shortHex(state.rootFingerprint, 18)}</span></p>
-      <p>Context trust decision: <strong>${state.validation?.ok ? 'Trusted' : 'Rejected'}</strong></p>
+      <p>Context trust decision: <strong class="${state.validation?.ok ? 'pass' : 'fail'}">${state.validation?.ok ? 'Trusted' : 'Rejected'}</strong></p>
+      <p class="teach"><strong>Why the OS store rejects this chain:</strong> the same cryptographically valid chain is <em>Trusted</em> by the Browser and Application stores but <em>Rejected</em> by the OS store &mdash; not because any signature is wrong, but because that store does not list this Root&rsquo;s fingerprint as an anchor. Trust is a policy decision about <em>which roots you choose to believe</em>, not a property of the math.</p>
       <div class="incident-grid">
         <article><h3>DigiNotar (2011)</h3><p>Fraudulent certs for major domains triggered emergency root distrust.</p></article>
         <article><h3>Symantec Distrust (2017)</h3><p>Chrome removed trust after systemic issuance and audit failures.</p></article>
@@ -218,6 +298,7 @@ function exhibitsMarkup(state: AppState): string {
         <li class="${compromiseSet.has(state.chain.intermediate.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.intermediate.cert.subject)}</li>
         <li class="${compromiseSet.has(state.chain.leaf.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.leaf.cert.subject)}</li>
       </ul>
+      <p class="teach"><strong>Blast radius:</strong> a stolen CA private key can mint <em>new</em> valid certificates for any name, so every certificate beneath the compromised CA must be treated as untrustworthy &mdash; even leaves that were issued correctly. Compromise the Intermediate and the Leaf falls; compromise the Root and the entire hierarchy falls. This is why Root keys live offline in HSMs and day-to-day issuance is delegated to Intermediates.</p>
       <p class="incident-note"><strong>DigiNotar 2011:</strong> attacker-issued fraudulent certificates (including google.com), prompting browser vendors to distrust the CA and break trust for all descendants.</p>
     </section>
 
@@ -232,26 +313,30 @@ function exhibitsMarkup(state: AppState): string {
       </div>
       <p>Log size: <strong>${state.ctLog.size}</strong> | Log ID: <span class="mono">${shortHex(state.ctLog.logId, 14)}</span></p>
       <p>SCT: ${state.latestSct ? `<span class="mono">${shortHex(state.latestSct.entryHash, 14)}</span> at ${new Date(state.latestSct.timestamp).toLocaleTimeString()}` : 'No SCT generated yet.'}</p>
-      <p>Inclusion proof: ${state.latestProof ? `${state.latestProof.auditPath.length} sibling hashes, verify=${state.latestProofValid ? 'true' : 'false'}` : 'Not generated.'}</p>
-      <p>Consistency proof: ${state.latestConsistency ? `old=${state.latestConsistency.oldSize}, new=${state.latestConsistency.newSize}, verify=${state.latestConsistencyValid ? 'true' : 'false'}` : 'Not generated.'}</p>
+      <p>Inclusion proof: ${state.latestProof ? `${state.latestProof.auditPath.length} sibling hash${state.latestProof.auditPath.length === 1 ? '' : 'es'} to recompute root, verify=<strong class="${state.latestProofValid ? 'pass' : 'fail'}">${state.latestProofValid ? 'true' : 'false'}</strong>` : 'Not generated.'}</p>
+      <p>Consistency proof: ${state.latestConsistency ? `old=${state.latestConsistency.oldSize} &rarr; new=${state.latestConsistency.newSize}, path=${state.latestConsistency.proof.length} hash${state.latestConsistency.proof.length === 1 ? '' : 'es'}, verify=<strong class="${state.latestConsistencyValid ? 'pass' : 'fail'}">${state.latestConsistencyValid ? 'true' : 'false'}</strong>` : 'Not generated.'}</p>
       <p class="status ${state.misissuance?.suspicious ? 'fail' : 'pass'}" role="status" aria-live="polite">Misissuance monitor: ${state.misissuance ? state.misissuance.reason : 'No suspicious issuance observed.'}</p>
-      <p class="incident-note">CT bridge: Merkle proofs from this panel mirror the trust model used by public browser CT logs.</p>
+      <p class="teach"><strong>What the proofs guarantee (RFC 6962):</strong> the <em>inclusion proof</em> shows your certificate is in the log using only ~log&#8322;(n) sibling hashes &mdash; not the whole log. The <em>consistency proof</em> shows the new tree only <em>appended</em> to the old one and rewrote no history, again with a handful of hashes. Together they make a misbehaving log detectable: it cannot hide a certificate or fork its view without producing a proof that fails to verify.</p>
     </section>
 
     <section class="panel exhibit" id="exhibit-6" aria-labelledby="ex6-heading">
       <h2 id="ex6-heading">Exhibit 6 &mdash; PQ Migration</h2>
-      <p class="caption">Compare classical and post-quantum certificate chain signatures and migration strategy.</p>
+      <p class="caption">Compare classical and post-quantum certificate signature footprints and migration strategy.</p>
       <div class="tab-row" role="tablist" aria-label="Post-quantum algorithm selection">
         <button class="tab ${state.pqMode === 'classical' ? 'active' : ''}" data-pq="classical" type="button" role="tab" aria-selected="${state.pqMode === 'classical'}">P-256</button>
         <button class="tab ${state.pqMode === 'mldsa' ? 'active' : ''}" data-pq="mldsa" type="button" role="tab" aria-selected="${state.pqMode === 'mldsa'}">ML-DSA</button>
         <button class="tab ${state.pqMode === 'hybrid' ? 'active' : ''}" data-pq="hybrid" type="button" role="tab" aria-selected="${state.pqMode === 'hybrid'}">Hybrid</button>
       </div>
-      <h3>${pqInfo.title}</h3>
-      <p><strong>Algorithm:</strong> ${pqInfo.alg}</p>
-      <p><strong>Signature footprint:</strong> ${pqInfo.sigBytes}</p>
-      <p><strong>Public key footprint:</strong> ${pqInfo.keyBytes}</p>
-      <p>${pqInfo.note}</p>
-      <p class="incident-note">Compatibility note: browsers currently validate classical WebPKI signatures; PQ rollouts are expected to use hybrid certificates first.</p>
+      <p class="caption">Signature size (bytes), drawn to scale &mdash; the classical bar is measured from this lab&rsquo;s live chain:</p>
+      <div class="pq-bars" aria-label="Signature size comparison">
+        ${pqBarsMarkup(state)}
+      </div>
+      <h3>${activePq.label}</h3>
+      <p><strong>Algorithm:</strong> ${activePq.alg}</p>
+      <p><strong>Signature footprint:</strong> ${activePq.sigBytes.toLocaleString()} bytes${activePq.measured ? ' (measured live)' : ' (FIPS 204 reference)'}</p>
+      <p><strong>Public key footprint:</strong> ${activePq.keyBytes.toLocaleString()} bytes</p>
+      <p>${activePq.note}</p>
+      <p class="incident-note">Compatibility note: browsers currently validate classical WebPKI signatures; PQ rollouts are expected to use hybrid certificates first. ML-DSA sizes are FIPS 204 reference values — WebCrypto cannot yet generate them.</p>
     </section>
 
     <footer class="panel footer-note" role="contentinfo">
@@ -260,12 +345,35 @@ function exhibitsMarkup(state: AppState): string {
   `;
 }
 
+async function resetLab(state: AppState): Promise<void> {
+  state.tamperedNodes.clear();
+  state.revokeViaCrl = false;
+  state.revokeViaOcsp = false;
+  state.compromisedCa = null;
+  state.trustContext = 'browser';
+  state.pqMode = 'classical';
+  state.selectedNode = 'leaf';
+  state.ctLog = await createCtLog();
+  state.latestSct = null;
+  state.latestProof = null;
+  state.latestProofValid = null;
+  state.latestConsistency = null;
+  state.latestConsistencyValid = null;
+  state.misissuance = null;
+  await recomputeValidation(state);
+}
+
 function bindEvents(state: AppState): void {
   const themeToggle = document.querySelector<HTMLButtonElement>('#theme-toggle');
   themeToggle?.addEventListener('click', () => {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = state.theme;
     localStorage.setItem('theme', state.theme);
+    render(state);
+  });
+
+  document.querySelector<HTMLButtonElement>('#reset-lab')?.addEventListener('click', async () => {
+    await resetLab(state);
     render(state);
   });
 
@@ -284,15 +392,12 @@ function bindEvents(state: AppState): void {
   document.querySelectorAll<HTMLButtonElement>('[data-tamper]').forEach((button) => {
     button.addEventListener('click', async () => {
       const node = button.dataset.tamper as CertNode;
-      if (node === 'root') {
-        state.chain.root.cert = mutateCertificateForTamper(state.chain.root.cert);
-      } else if (node === 'intermediate') {
-        state.chain.intermediate.cert = mutateCertificateForTamper(state.chain.intermediate.cert);
+      if (state.tamperedNodes.has(node)) {
+        state.tamperedNodes.delete(node);
       } else {
-        state.chain.leaf.cert = mutateCertificateForTamper(state.chain.leaf.cert);
+        state.tamperedNodes.add(node);
       }
-
-      state.tamperedNodes.add(node);
+      state.selectedNode = node;
       await recomputeValidation(state);
       render(state);
     });
@@ -375,7 +480,7 @@ function bindEvents(state: AppState): void {
 }
 
 function render(state: AppState): void {
-  app.innerHTML = `<main class="page">${exhibitsMarkup(state)}</main>`;
+  app!.innerHTML = `<main class="page">${exhibitsMarkup(state)}</main>`;
   bindEvents(state);
 }
 

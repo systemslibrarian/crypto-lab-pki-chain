@@ -27,7 +27,8 @@ export interface ConsistencyProof {
   newSize: number;
   oldRoot: string;
   newRoot: string;
-  leavesForNewTree: string[];
+  /** RFC 6962 consistency proof path — an O(log n) set of subtree hashes, NOT the full leaf set. */
+  proof: string[];
 }
 
 export interface MisissuanceResult {
@@ -40,7 +41,7 @@ export interface CtLog {
   logId: string;
   leaves: CtLeaf[];
   submitCertificate: (certificate: Certificate) => Promise<SignedCertificateTimestamp>;
-  rootHash: () => Promise<string>;
+  rootHash: (treeSize?: number) => Promise<string>;
   generateInclusionProof: (leafIndex: number, treeSize?: number) => Promise<InclusionProof>;
   verifyInclusionProof: (proof: InclusionProof) => Promise<boolean>;
   generateConsistencyProof: (oldSize: number, newSize: number) => Promise<ConsistencyProof>;
@@ -49,10 +50,6 @@ export interface CtLog {
     certificate: Certificate,
     expectedIssuers: Set<string>,
   ) => MisissuanceResult;
-}
-
-interface MerkleLevel {
-  hashes: string[];
 }
 
 interface CtEngineState {
@@ -107,48 +104,164 @@ function certCanonicalBytes(certificate: Certificate): Uint8Array {
   return new TextEncoder().encode(payload);
 }
 
+// ── RFC 6962 Merkle tree hashing ──────────────────────────────────────────
+// The structure below follows RFC 6962 §2.1 exactly: leaves are prefixed with
+// 0x00, interior nodes with 0x01, and a tree of n leaves is split at the
+// LARGEST power of two strictly less than n. Crucially, lone right-hand nodes
+// are NOT duplicated (the historical Bitcoin-style flaw) — that is what lets
+// CT produce compact O(log n) inclusion and consistency proofs.
+
+/** Leaf hash: H(0x00 || cert bytes). */
 async function hashLeaf(certBytes: Uint8Array): Promise<string> {
-  const prefixed = concatBytes(new Uint8Array([0x00]), certBytes);
-  return sha256Hex(prefixed);
+  return sha256Hex(concatBytes(new Uint8Array([0x00]), certBytes));
 }
 
+/** Interior node hash: H(0x01 || left || right). */
 async function hashNode(leftHex: string, rightHex: string): Promise<string> {
-  const input = concatBytes(
-    new Uint8Array([0x01]),
-    hexToBytes(leftHex),
-    hexToBytes(rightHex),
-  );
-  return sha256Hex(input);
+  return sha256Hex(concatBytes(new Uint8Array([0x01]), hexToBytes(leftHex), hexToBytes(rightHex)));
 }
 
-async function merkleLevels(leafHashes: string[]): Promise<MerkleLevel[]> {
+/** Largest power of two strictly less than n (n >= 2). */
+function largestPowerOfTwoBelow(n: number): number {
+  let k = 1;
+  while (k * 2 < n) {
+    k *= 2;
+  }
+  return k;
+}
+
+/** Merkle Tree Hash (MTH) over a list of already-computed leaf hashes. */
+async function merkleTreeHash(leafHashes: string[]): Promise<string> {
   if (leafHashes.length === 0) {
-    return [{ hashes: [] }];
+    // MTH({}) = SHA-256() of the empty string (RFC 6962 §2.1).
+    return sha256Hex(new Uint8Array(0));
+  }
+  if (leafHashes.length === 1) {
+    return leafHashes[0];
+  }
+  const k = largestPowerOfTwoBelow(leafHashes.length);
+  const left = await merkleTreeHash(leafHashes.slice(0, k));
+  const right = await merkleTreeHash(leafHashes.slice(k));
+  return hashNode(left, right);
+}
+
+type AuditStep = { hash: string; position: 'left' | 'right' };
+
+/** RFC 6962 PATH(m, D[n]) — the audit path for leaf m, returned leaf→root. */
+async function auditPath(m: number, leafHashes: string[]): Promise<AuditStep[]> {
+  const n = leafHashes.length;
+  if (n <= 1) {
+    return [];
+  }
+  const k = largestPowerOfTwoBelow(n);
+  if (m < k) {
+    const sub = await auditPath(m, leafHashes.slice(0, k));
+    const sibling = await merkleTreeHash(leafHashes.slice(k));
+    return [...sub, { hash: sibling, position: 'right' }];
+  }
+  const sub = await auditPath(m - k, leafHashes.slice(k));
+  const sibling = await merkleTreeHash(leafHashes.slice(0, k));
+  return [...sub, { hash: sibling, position: 'left' }];
+}
+
+/** RFC 6962 SUBPROOF(m, D[n], b) — the building block for consistency proofs. */
+async function subProof(m: number, leafHashes: string[], b: boolean): Promise<string[]> {
+  const n = leafHashes.length;
+  if (m === n) {
+    return b ? [] : [await merkleTreeHash(leafHashes)];
+  }
+  const k = largestPowerOfTwoBelow(n);
+  if (m <= k) {
+    const sub = await subProof(m, leafHashes.slice(0, k), b);
+    return [...sub, await merkleTreeHash(leafHashes.slice(k))];
+  }
+  const sub = await subProof(m - k, leafHashes.slice(k), false);
+  return [...sub, await merkleTreeHash(leafHashes.slice(0, k))];
+}
+
+/** RFC 6962 PROOF(m, D[n]) — consistency proof between sizes m and n. */
+async function consistencyPath(m: number, leafHashes: string[]): Promise<string[]> {
+  if (m === 0 || m === leafHashes.length) {
+    return [];
+  }
+  return subProof(m, leafHashes, true);
+}
+
+/**
+ * Canonical RFC 6962 §2.1.2 consistency-proof verification. Reconstructs BOTH
+ * the old and new roots from the compact proof path and checks they match.
+ */
+async function verifyConsistency(
+  oldSize: number,
+  newSize: number,
+  oldRoot: string,
+  newRoot: string,
+  path: string[],
+): Promise<boolean> {
+  if (oldSize < 0 || oldSize > newSize) {
+    return false;
+  }
+  if (oldSize === newSize) {
+    return path.length === 0 && oldRoot === newRoot;
+  }
+  if (oldSize === 0) {
+    // The empty tree is consistent with any later tree; the proof carries no nodes.
+    return path.length === 0;
   }
 
-  const levels: MerkleLevel[] = [{ hashes: leafHashes.slice() }];
-  while (levels[levels.length - 1].hashes.length > 1) {
-    const current = levels[levels.length - 1].hashes;
-    const next: string[] = [];
+  let node = oldSize - 1;
+  let lastNode = newSize - 1;
+  while (node % 2 === 1) {
+    node = Math.floor(node / 2);
+    lastNode = Math.floor(lastNode / 2);
+  }
 
-    for (let i = 0; i < current.length; i += 2) {
-      const left = current[i];
-      const right = current[i + 1] ?? current[i];
-      next.push(await hashNode(left, right));
+  let index = 0;
+  const next = (): string | undefined => path[index++];
+
+  let oldHash: string;
+  let newHash: string;
+  if (node > 0) {
+    const seed = next();
+    if (seed === undefined) {
+      return false;
     }
-
-    levels.push({ hashes: next });
+    oldHash = seed;
+    newHash = seed;
+  } else {
+    oldHash = oldRoot;
+    newHash = oldRoot;
   }
 
-  return levels;
-}
-
-async function rootFromLeaves(leafHashes: string[]): Promise<string> {
-  if (leafHashes.length === 0) {
-    return sha256Hex(new Uint8Array([0xff]));
+  while (node > 0) {
+    if (node % 2 === 1) {
+      const sibling = next();
+      if (sibling === undefined) {
+        return false;
+      }
+      oldHash = await hashNode(sibling, oldHash);
+      newHash = await hashNode(sibling, newHash);
+    } else if (node < lastNode) {
+      const sibling = next();
+      if (sibling === undefined) {
+        return false;
+      }
+      newHash = await hashNode(newHash, sibling);
+    }
+    node = Math.floor(node / 2);
+    lastNode = Math.floor(lastNode / 2);
   }
-  const levels = await merkleLevels(leafHashes);
-  return levels[levels.length - 1].hashes[0];
+
+  while (lastNode > 0) {
+    const sibling = next();
+    if (sibling === undefined) {
+      return false;
+    }
+    newHash = await hashNode(newHash, sibling);
+    lastNode = Math.floor(lastNode / 2);
+  }
+
+  return oldHash === oldRoot && newHash === newRoot && index === path.length;
 }
 
 async function createSct(
@@ -210,6 +323,9 @@ export async function createCtLog(): Promise<CtLog> {
     leaves: [],
   };
 
+  const leafHashesUpTo = (treeSize: number): string[] =>
+    state.leaves.slice(0, treeSize).map((leaf) => leaf.certHash);
+
   return {
     get size() {
       return state.leaves.length;
@@ -233,8 +349,11 @@ export async function createCtLog(): Promise<CtLog> {
 
       return createSct(state, certHash, timestamp);
     },
-    async rootHash(): Promise<string> {
-      return rootFromLeaves(state.leaves.map((leaf) => leaf.certHash));
+    async rootHash(treeSize = state.leaves.length): Promise<string> {
+      if (treeSize < 0 || treeSize > state.leaves.length) {
+        throw new Error('Tree size out of range.');
+      }
+      return merkleTreeHash(leafHashesUpTo(treeSize));
     },
     async generateInclusionProof(leafIndex: number, treeSize = state.leaves.length): Promise<InclusionProof> {
       if (treeSize < 1 || treeSize > state.leaves.length) {
@@ -244,31 +363,15 @@ export async function createCtLog(): Promise<CtLog> {
         throw new Error('Leaf index out of range for requested tree size.');
       }
 
-      const hashes = state.leaves.slice(0, treeSize).map((leaf) => leaf.certHash);
-      const levels = await merkleLevels(hashes);
-      const auditPath: InclusionProof['auditPath'] = [];
-
-      let position = leafIndex;
-      for (let level = 0; level < levels.length - 1; level += 1) {
-        const nodes = levels[level].hashes;
-        const isLeft = position % 2 === 0;
-        const siblingIndex = isLeft ? position + 1 : position - 1;
-        const siblingHash = nodes[siblingIndex] ?? nodes[position];
-        auditPath.push({
-          hash: siblingHash,
-          position: isLeft ? 'right' : 'left',
-        });
-        position = Math.floor(position / 2);
-      }
-
-      const leafHash = hashes[leafIndex];
-      const rootHash = levels[levels.length - 1].hashes[0];
+      const hashes = leafHashesUpTo(treeSize);
+      const path = await auditPath(leafIndex, hashes);
+      const rootHash = await merkleTreeHash(hashes);
 
       return {
         leafIndex,
         treeSize,
-        leafHash,
-        auditPath,
+        leafHash: hashes[leafIndex],
+        auditPath: path,
         rootHash,
       };
     },
@@ -294,29 +397,21 @@ export async function createCtLog(): Promise<CtLog> {
         throw new Error('Requested size exceeds current log size.');
       }
 
-      const allLeafHashes = state.leaves.slice(0, newSize).map((leaf) => leaf.certHash);
-      const oldRoot = await rootFromLeaves(allLeafHashes.slice(0, oldSize));
-      const newRoot = await rootFromLeaves(allLeafHashes);
+      const newHashes = leafHashesUpTo(newSize);
+      const oldRoot = await merkleTreeHash(newHashes.slice(0, oldSize));
+      const newRoot = await merkleTreeHash(newHashes);
+      const proof = await consistencyPath(oldSize, newHashes);
 
       return {
         oldSize,
         newSize,
         oldRoot,
         newRoot,
-        leavesForNewTree: allLeafHashes,
+        proof,
       };
     },
     async verifyConsistencyProof(proof: ConsistencyProof): Promise<boolean> {
-      if (proof.oldSize > proof.newSize) {
-        return false;
-      }
-      if (proof.leavesForNewTree.length !== proof.newSize) {
-        return false;
-      }
-
-      const computedOld = await rootFromLeaves(proof.leavesForNewTree.slice(0, proof.oldSize));
-      const computedNew = await rootFromLeaves(proof.leavesForNewTree);
-      return computedOld === proof.oldRoot && computedNew === proof.newRoot;
+      return verifyConsistency(proof.oldSize, proof.newSize, proof.oldRoot, proof.newRoot, proof.proof);
     },
     detectMisissuance(certificate: Certificate, expectedIssuers: Set<string>): MisissuanceResult {
       if (expectedIssuers.size === 0) {
