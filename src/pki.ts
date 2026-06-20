@@ -85,7 +85,7 @@ function certToBeSigned(cert: Omit<Certificate, 'signature'>): string {
   });
 }
 
-function unsignedCertificatePayload(cert: Certificate): Uint8Array {
+function unsignedCertificatePayload(cert: Certificate): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(
     certToBeSigned({
       subject: cert.subject,

@@ -65,7 +65,17 @@ body {
 
 .hero {
   position: relative;
-  padding-top: 2.5rem;
+  padding-top: 3.2rem;
+}
+
+.hero-actions {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 10;
 }
 
 .theme-toggle {
@@ -228,6 +238,12 @@ button {
   background: color-mix(in oklab, var(--fail), var(--surface) 74%);
 }
 
+.btn.ghost.tampered {
+  background: color-mix(in oklab, var(--fail), var(--surface) 64%);
+  border-color: var(--fail);
+  color: var(--text);
+}
+
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -290,6 +306,107 @@ button {
   margin: 0;
   text-align: center;
   color: var(--accent-soft);
+}
+
+/* ── Teaching callouts ── */
+
+.teach {
+  margin: 0.2rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.teach strong {
+  color: var(--accent);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  background: color-mix(in oklab, var(--surface), black 8%);
+}
+
+/* ── PQ signature-size bars ── */
+
+.pq-bars {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pq-bar-row {
+  display: grid;
+  grid-template-columns: 12rem 1fr auto;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.pq-bar-row.active .pq-bar-fill {
+  background: var(--accent);
+}
+
+.pq-bar-label {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.pq-tag {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ok);
+  border: 1px solid var(--ok);
+  border-radius: 0.4rem;
+  padding: 0 0.25rem;
+  margin-left: 0.3rem;
+}
+
+.pq-bar-track {
+  height: 1.1rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface), black 10%);
+  overflow: hidden;
+}
+
+.pq-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent), var(--surface) 30%);
+  transition: width 0.4s ease;
+}
+
+.pq-bar-value {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .pq-bar-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'label value'
+      'track track';
+    gap: 0.3rem 0.5rem;
+  }
+
+  .pq-bar-label {
+    grid-area: label;
+  }
+
+  .pq-bar-value {
+    grid-area: value;
+    text-align: right;
+  }
+
+  .pq-bar-track {
+    grid-area: track;
+  }
 }
 
 /* ── Skip-link (ADA keyboard navigation) ── */
