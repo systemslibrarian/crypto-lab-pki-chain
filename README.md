@@ -1,5 +1,3 @@
-[![crypto-lab portfolio](https://img.shields.io/badge/crypto--lab-portfolio-blue?style=flat-square)](https://systemslibrarian.github.io/crypto-lab/)
-
 # crypto-lab-pki-chain
 
 ## What It Is
@@ -12,11 +10,12 @@ This browser-native lab demonstrates Public Key Infrastructure (PKI) certificate
 - **Auditing a custom certificate validator** — the tamper and revocation controls expose exactly which checks a validator must pass.
 - **Understanding CT monitoring** — useful when building a certificate log monitor or implementing CT client-side verification.
 - **Studying CA compromise blast radius** — the intermediate and root compromise scenarios show which certificates become invalid when a CA key is stolen.
-- **Do not use PKI** when you need peer-to-peer trust without a central authority; web-of-trust or decentralized PKI (e.g., DANE) are better fits for that model.
+- When you need peer-to-peer trust without a central authority, prefer web-of-trust or decentralized PKI (e.g., DANE); hierarchical PKI is the wrong model for that.
+- Do NOT treat this as a production PKI or certificate validator — it is a browser teaching demo, not a hardened CA or TLS stack.
 
 ## Live Demo
 
-[https://systemslibrarian.github.io/crypto-lab-pki-chain/](https://systemslibrarian.github.io/crypto-lab-pki-chain/)
+**[systemslibrarian.github.io/crypto-lab-pki-chain](https://systemslibrarian.github.io/crypto-lab-pki-chain/)**
 
 The demo provides six interactive exhibits. The **Tamper / Repair** buttons toggle a single signed field on any certificate so you can flip a link between PASS and FAIL and watch WebCrypto signature verification react in real time; a **Reset lab** button restores every scenario to its defaults. Toggle **CRL** and **OCSP** checkboxes to simulate leaf revocation, switch trust store contexts (Browser / OS / Application), mark a CA as compromised to see subtree distrust, submit certificates to the simulated CT log to generate SCTs and verify **RFC 6962 Merkle inclusion and consistency proofs**, and compare classical P-256, ML-DSA, and hybrid post-quantum signature footprints drawn to scale from the live chain.
 
@@ -38,15 +37,21 @@ The Merkle log is implemented to RFC 6962 exactly — leaves prefixed with `0x00
 - **ACME protocol (RFC 8555)** — the automated certificate issuance protocol used by Let's Encrypt and other CAs encodes the Root → Intermediate → Leaf chain model directly in its order and finalization flow.
 - **Mozilla NSS / Firefox** — maintains an independent root CA trust store (distinct from the OS store), demonstrating exactly the trust-store divergence shown in Exhibit 3.
 
-## Running Locally
+## How to Run Locally
 
 ```bash
+git clone https://github.com/systemslibrarian/crypto-lab-pki-chain
+cd crypto-lab-pki-chain
 npm install
-npm run dev        # start the Vite dev server
-npm run typecheck  # strict TypeScript type-check (tsc --noEmit)
-npm test           # run the Vitest crypto test suite
-npm run build      # production build to dist/
+npm run dev
 ```
+
+## Related Demos
+- [crypto-lab-merkle-vault](https://systemslibrarian.github.io/crypto-lab-merkle-vault/) — SHA-256 Merkle trees and inclusion proofs, the data structure behind Certificate Transparency.
+- [crypto-lab-web-of-trust](https://systemslibrarian.github.io/crypto-lab-web-of-trust/) — the decentralized PGP trust-graph alternative to hierarchical CA trust.
+- [crypto-lab-dilithium-seal](https://systemslibrarian.github.io/crypto-lab-dilithium-seal/) — ML-DSA signatures, the post-quantum option compared against P-256 in this chain.
+- [crypto-lab-pq-rotation](https://systemslibrarian.github.io/crypto-lab-pq-rotation/) — hybrid X.509 certificates and the operational PKI migration to post-quantum signatures.
+- [crypto-lab-kerberos](https://systemslibrarian.github.io/crypto-lab-kerberos/) — an alternative authentication model based on a trusted ticket-granting authority rather than certificate chains.
 
 ## Tests
 
@@ -58,5 +63,7 @@ A cryptography lab should prove its own crypto, so the math is covered by an exe
 - **RFC 6962 Merkle proofs** — inclusion and consistency proofs verify for every leaf and every `old < new` size up to eight, stay `O(log n)` in size, and are rejected when any root or proof node is corrupted.
 
 ---
+
+*One of 60+ browser demos in the [Crypto Lab](https://crypto-lab.systemslibrarian.dev/) suite.*
 
 *"So whether you eat or drink or whatever you do, do it all for the glory of God." — 1 Corinthians 10:31*
