@@ -340,6 +340,12 @@ function exhibitsMarkup(state: AppState): string {
     </section>
 
     <footer class="panel footer-note" role="contentinfo">
+      <p>Related demos:
+        <a href="https://systemslibrarian.github.io/crypto-lab-merkle-vault/">crypto-lab-merkle-vault</a> &middot;
+        <a href="https://systemslibrarian.github.io/crypto-lab-web-of-trust/">crypto-lab-web-of-trust</a> &middot;
+        <a href="https://systemslibrarian.github.io/crypto-lab-dilithium-seal/">crypto-lab-dilithium-seal</a> &middot;
+        <a href="https://systemslibrarian.github.io/crypto-lab-pq-rotation/">crypto-lab-pq-rotation</a> &middot;
+        <a href="https://systemslibrarian.github.io/crypto-lab-kerberos/">crypto-lab-kerberos</a></p>
       <p>So whether you eat or drink or whatever you do, do it all for the glory of God. &mdash; 1 Corinthians 10:31</p>
     </footer>
   `;
