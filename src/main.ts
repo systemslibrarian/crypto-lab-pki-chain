@@ -205,16 +205,22 @@ function exhibitsMarkup(state: AppState): string {
     state.tamperedNodes.has(node) ? `Repair ${name}` : `Tamper ${name}`;
 
   return `
-    <header class="hero panel" role="banner">
+    <header class="cl-hero panel">
       <div class="hero-actions">
         <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset all lab scenarios to defaults"${tamperCount === 0 && !state.revokeViaCrl && !state.revokeViaOcsp && !state.compromisedCa && state.trustContext === 'browser' ? ' disabled' : ''}>Reset lab</button>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
           <span aria-hidden="true">${state.theme === 'dark' ? '🌙' : '☀️'}</span>
         </button>
       </div>
-      <p class="eyebrow" aria-hidden="true">crypto-lab interactive exhibit</p>
-      <h1>PKI Chain, Trust, and CT</h1>
-      <p class="lede">Explore certificate chain trust, CA failure blast radius, and Certificate Transparency monitoring in one browser-native lab. Every signature, hash, and Merkle proof here is computed live with <code>crypto.subtle</code> &mdash; nothing is faked.</p>
+      <div class="cl-hero-main">
+        <h1 class="cl-hero-title">PKI Chain</h1>
+        <p class="cl-hero-sub">Certificate Chain Trust &middot; X.509 &middot; RFC 5280 &middot; CT (RFC 6962)</p>
+        <p class="cl-hero-desc">Walk a Root &rarr; Intermediate &rarr; Leaf chain link-by-link, tampering, revoking, and compromising CAs while live <code>crypto.subtle</code> signatures, Merkle inclusion/consistency proofs, and PQ signature sizes recompute in the browser.</p>
+      </div>
+      <aside class="cl-hero-why" aria-label="Why it matters">
+        <span class="cl-hero-why-label">WHY IT MATTERS</span>
+        <p class="cl-hero-why-text">Every HTTPS connection rests on this chain. One stolen CA key or an unlisted root can silently forge trusted certificates for any site &mdash; so knowing how validation, revocation, and Certificate Transparency actually contain that blast radius is core web security.</p>
+      </aside>
     </header>
 
     <section class="panel exhibit" id="exhibit-1" aria-labelledby="ex1-heading">
