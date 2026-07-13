@@ -1,8 +1,10 @@
 import './style.css';
 import {
   createCtLog,
+  nodeKey,
   type CtLog,
   type InclusionProof,
+  type MerkleTreeNode,
   type SignedCertificateTimestamp,
   type ConsistencyProof,
   type MisissuanceResult,
@@ -32,6 +34,9 @@ interface AppState {
   chain: CertificateChain;
   selectedNode: CertNode;
   validation: ValidationResult | null;
+  /** Validation of the pristine, untampered chain — its signatures always verify.
+   *  Used by the compromise exhibit to show "signatures still verify" honestly. */
+  baselineValidation: ValidationResult | null;
   trustStores: Record<TrustContext, TrustStore>;
   trustContext: TrustContext;
   tamperedNodes: Set<CertNode>;
@@ -39,6 +44,8 @@ interface AppState {
   revokeViaOcsp: boolean;
   compromisedCa: CompromisedCa | null;
   ctLog: CtLog;
+  ctTree: MerkleTreeNode | null;
+  proofTarget: number;
   latestSct: SignedCertificateTimestamp | null;
   latestProof: InclusionProof | null;
   latestProofValid: boolean | null;
@@ -99,6 +106,10 @@ function certAt(state: AppState, node: CertNode): Certificate {
     return chain.intermediate.cert;
   }
   return chain.leaf.cert;
+}
+
+async function refreshCtTree(state: AppState): Promise<void> {
+  state.ctTree = state.ctLog.size >= 1 ? await state.ctLog.treeLayout() : null;
 }
 
 async function recomputeValidation(state: AppState): Promise<void> {
@@ -193,6 +204,326 @@ function pqBarsMarkup(state: AppState): string {
     .join('');
 }
 
+const TAMPER_STEP_LABEL: Record<CertNode, string> = {
+  root: 'Root self-signature',
+  intermediate: 'Intermediate signature',
+  leaf: 'Leaf signature',
+};
+
+const NODE_NAME: Record<CertNode, string> = {
+  root: 'Root CA',
+  intermediate: 'Intermediate CA',
+  leaf: 'Leaf',
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * Render Exhibit 2's cause→effect coupling for a tampered node: the byte-level
+ * before/after of the signed payload's subject field, plus which validation
+ * step flipped to FAIL as a result. Honest — the added bytes are the real
+ * tamper mark the validator sees.
+ */
+function tamperCouplingMarkup(state: AppState): string {
+  const tampered = (['root', 'intermediate', 'leaf'] as CertNode[]).filter((n) =>
+    state.tamperedNodes.has(n),
+  );
+  if (tampered.length === 0) {
+    return '';
+  }
+
+  const node = tampered.includes(state.selectedNode)
+    ? state.selectedNode
+    : tampered[tampered.length - 1];
+
+  const pristine = state.chain[node].cert;
+  const altered = applyTamper(pristine);
+
+  // The subject field is the tampered one; everything else is byte-identical.
+  const before = pristine.subject;
+  const after = altered.subject;
+  const addedBytes = new TextEncoder().encode(TAMPER_MARK).length;
+
+  const stepLabel = TAMPER_STEP_LABEL[node];
+  const brokeStep = state.validation?.steps.find((s) => s.label === stepLabel);
+  const brokeFailed = brokeStep ? !brokeStep.ok : true;
+
+  return `
+    <div class="tamper-coupling" role="group" aria-label="Tamper cause and effect for ${NODE_NAME[node]}">
+      <p class="tc-head"><strong>What the tamper did to ${NODE_NAME[node]}:</strong> ${addedBytes} bytes appended to the signed <code>subject</code> field.</p>
+      <div class="tc-diff" role="region" aria-label="Signed payload before and after tamper" tabindex="0">
+        <div class="tc-row">
+          <span class="tc-label">signed</span>
+          <span class="mono tc-bytes">&hellip;subject:"${escapeHtml(before)}"&hellip;</span>
+        </div>
+        <div class="tc-row">
+          <span class="tc-label">now hashed</span>
+          <span class="mono tc-bytes">&hellip;subject:"${escapeHtml(pristine.subject)}<span class="tc-added">${escapeHtml(TAMPER_MARK)}</span>"&hellip;</span>
+        </div>
+      </div>
+      <p class="tc-effect ${brokeFailed ? 'fail' : 'pass'}" role="status">
+        <span aria-hidden="true">${brokeFailed ? '✗' : '✓'}</span>
+        Because those bytes differ from what was signed, the <a href="#step-${node}" class="tc-jump">${stepLabel}</a> check ${brokeFailed ? 'flipped to FAIL' : 'is currently PASS (repair applied)'} &mdash; the issuer&rsquo;s key never signed <em>${escapeHtml(after)}</em>.
+      </p>
+    </div>
+  `;
+}
+
+/**
+ * Exhibit 4 contrast panel: for each link, show that the cryptographic signature
+ * STILL verifies (from the pristine baseline — compromise never breaks the math)
+ * next to the policy trust decision (distrusted when the CA is compromised). This
+ * is the whole "key stolen ≠ signature invalid" lesson made visible.
+ */
+function compromiseLinksMarkup(state: AppState): string {
+  const compromiseSet = compromisedSubtree(state.chain, state.compromisedCa);
+  const steps = state.baselineValidation?.steps ?? [];
+  const sigOk = (label: string): boolean => steps.find((s) => s.label === label)?.ok ?? true;
+
+  const rows: Array<{ node: CertNode; sigLabel: string }> = [
+    { node: 'root', sigLabel: 'Root self-signature' },
+    { node: 'intermediate', sigLabel: 'Intermediate signature' },
+    { node: 'leaf', sigLabel: 'Leaf signature' },
+  ];
+
+  const body = rows
+    .map(({ node, sigLabel }) => {
+      const cert = state.chain[node].cert;
+      const verifies = sigOk(sigLabel);
+      const distrusted = compromiseSet.has(cert.subject);
+      return `
+        <tr class="${distrusted ? 'row-distrusted' : ''}">
+          <th scope="row">${NODE_NAME[node]}</th>
+          <td class="${verifies ? 'pass' : 'fail'}"><span aria-hidden="true">${verifies ? '✓' : '✗'}</span> ${verifies ? 'signature verifies' : 'signature fails'}</td>
+          <td class="${distrusted ? 'fail' : 'pass'}"><span aria-hidden="true">${distrusted ? '✗' : '✓'}</span> ${distrusted ? 'distrusted by policy' : 'trusted'}</td>
+        </tr>`;
+    })
+    .join('');
+
+  const anyCompromise = state.compromisedCa !== null;
+  return `
+    <table class="compromise-table" aria-label="Signature validity versus policy trust per link">
+      <thead>
+        <tr>
+          <th scope="col">Link</th>
+          <th scope="col">Cryptographic signature</th>
+          <th scope="col">Trust decision</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+    <p class="compromise-contrast ${anyCompromise ? 'is-compromise' : ''}">${
+      anyCompromise
+        ? 'Note the split: every <strong>signature still verifies</strong> — the math is untouched — yet the affected links are <strong>distrusted by policy</strong>. That is the opposite of Exhibit 2, where tampering makes a signature genuinely <em>fail</em>. Compromise revokes <em>trust</em>; tamper breaks the <em>math</em>.'
+        : 'Right now all signatures verify and all links are trusted. Compromise a CA above and watch trust drop while the signatures stay valid.'
+    }</p>`;
+}
+
+/** Flatten a Merkle tree into rows keyed by level (leaves at level 0). */
+function treeRows(root: MerkleTreeNode): MerkleTreeNode[][] {
+  const rows: MerkleTreeNode[][] = [];
+  const visit = (node: MerkleTreeNode): void => {
+    (rows[node.level] ??= []).push(node);
+    node.children.forEach(visit);
+  };
+  visit(root);
+  // Sort each row left→right by the leaf span so the tree reads naturally.
+  rows.forEach((row) => row.sort((a, b) => a.span[0] - b.span[0]));
+  return rows;
+}
+
+/**
+ * Given the target leaf index and the tree, return the node-keys of (a) the
+ * ancestors of that leaf (the "recompute path" that is re-hashed up to the root)
+ * and (b) the audit-path siblings (the ~log₂n hashes the proof actually carries).
+ * Walking the real tree keeps the highlight identical to the RFC 6962 audit path.
+ */
+function proofHighlights(
+  root: MerkleTreeNode,
+  leafIndex: number,
+): { ancestors: Set<string>; siblings: Set<string>; leafKey: string } {
+  const ancestors = new Set<string>();
+  const siblings = new Set<string>();
+  let leafKey = '';
+  let node: MerkleTreeNode | undefined = root;
+  while (node) {
+    if (node.isLeaf) {
+      leafKey = nodeKey(node);
+      break;
+    }
+    ancestors.add(nodeKey(node));
+    const left: MerkleTreeNode = node.children[0];
+    const right: MerkleTreeNode = node.children[1];
+    if (leafIndex <= left.span[1]) {
+      siblings.add(nodeKey(right));
+      node = left;
+    } else {
+      siblings.add(nodeKey(left));
+      node = right;
+    }
+  }
+  // The root is an ancestor of the leaf but is drawn as the destination, not a
+  // re-hash step; keep it in `ancestors` so it lights up as "recomputed root".
+  return { ancestors, siblings, leafKey };
+}
+
+function merkleTreeMarkup(state: AppState): string {
+  const tree = state.ctTree;
+  if (!tree) {
+    return `<p class="ct-empty">Submit at least one certificate to grow the Merkle log and draw its tree.</p>`;
+  }
+
+  const proof = state.latestProof;
+  const hasProof = proof !== null && proof.treeSize === state.ctLog.size;
+  const hl = hasProof
+    ? proofHighlights(tree, proof.leafIndex)
+    : { ancestors: new Set<string>(), siblings: new Set<string>(), leafKey: '' };
+  const rootKey = nodeKey(tree);
+
+  const rows = treeRows(tree);
+  // Draw root row first (top) down to the leaf row (bottom).
+  const rowsMarkup = rows
+    .slice()
+    .reverse()
+    .map((row) => {
+      const cells = row
+        .map((node) => {
+          const key = nodeKey(node);
+          const isTarget = key === hl.leafKey;
+          const isSibling = hl.siblings.has(key);
+          const isAncestor = hl.ancestors.has(key) && key !== rootKey;
+          const isRoot = key === rootKey;
+          const dim = hasProof && !isTarget && !isSibling && !isAncestor && !isRoot;
+          const classes = [
+            'mtree-node',
+            node.isLeaf ? 'leaf' : 'branch',
+            isRoot ? 'is-root' : '',
+            isTarget ? 'is-target' : '',
+            isSibling ? 'is-sibling' : '',
+            isAncestor ? 'is-ancestor' : '',
+            dim ? 'is-dim' : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+
+          const roleLabel = isRoot
+            ? 'Merkle root'
+            : node.isLeaf
+              ? `Leaf ${node.span[0]}`
+              : `Node spanning leaves ${node.span[0]} to ${node.span[1]}`;
+          const proofRole = isTarget
+            ? ' (target leaf)'
+            : isSibling
+              ? ' (audit-path sibling)'
+              : isAncestor
+                ? ' (recomputed on path to root)'
+                : '';
+
+          // Leaf nodes are buttons so the learner can pick which leaf to prove.
+          if (node.isLeaf) {
+            return `<button type="button" class="${classes}" data-leaf-index="${node.span[0]}" aria-pressed="${isTarget}" aria-label="${roleLabel}${proofRole}, hash ${shortHex(node.hash, 6)}">
+              <span class="mtree-tag">L${node.span[0]}</span>
+              <span class="mtree-hash mono">${shortHex(node.hash, 5)}</span>
+            </button>`;
+          }
+          return `<div class="${classes}" role="group" aria-label="${roleLabel}${proofRole}, hash ${shortHex(node.hash, 6)}">
+            <span class="mtree-tag">${isRoot ? 'root' : `[${node.span[0]}..${node.span[1]}]`}</span>
+            <span class="mtree-hash mono">${shortHex(node.hash, 5)}</span>
+          </div>`;
+        })
+        .join('');
+      return `<div class="mtree-row">${cells}</div>`;
+    })
+    .join('');
+
+  let legend = '';
+  let rootCompare = '';
+  if (hasProof && proof) {
+    const match = state.latestProofValid === true;
+    legend = `
+      <ul class="mtree-legend" aria-label="Merkle proof legend">
+        <li><span class="swatch sw-target" aria-hidden="true"></span> Target leaf being proved</li>
+        <li><span class="swatch sw-sibling" aria-hidden="true"></span> Audit-path sibling supplied by the log (${proof.auditPath.length} total)</li>
+        <li><span class="swatch sw-ancestor" aria-hidden="true"></span> Recomputed while climbing to the root</li>
+      </ul>`;
+    rootCompare = `
+      <div class="root-compare" role="group" aria-label="Root comparison">
+        <div class="root-line">
+          <span class="root-tag">Recomputed root</span>
+          <span class="mono root-hash ${match ? 'pass' : 'fail'}">${shortHex(proof.rootHash, 10)}</span>
+        </div>
+        <div class="root-eq ${match ? 'pass' : 'fail'}" aria-hidden="true">${match ? '=' : '≠'}</div>
+        <div class="root-line">
+          <span class="root-tag">Log&rsquo;s stored root</span>
+          <span class="mono root-hash ${match ? 'pass' : 'fail'}">${shortHex(tree.hash, 10)}</span>
+        </div>
+        <p class="root-verdict ${match ? 'pass' : 'fail'}">${
+          match
+            ? `verify = true — the ${proof.auditPath.length} sibling hash${proof.auditPath.length === 1 ? '' : 'es'} reconstruct exactly the log’s root, so leaf ${proof.leafIndex} is provably in the log.`
+            : 'verify = false — the recomputed root does not match the log’s stored root.'
+        }</p>
+      </div>`;
+  }
+
+  return `
+    <div class="mtree" role="group" aria-label="Merkle tree of ${state.ctLog.size} logged certificate${state.ctLog.size === 1 ? '' : 's'}${hasProof ? `, inclusion proof for leaf ${proof!.leafIndex}` : ''}">
+      ${rowsMarkup}
+    </div>
+    ${legend}
+    ${rootCompare}
+    <p class="ct-hint">${
+      hasProof
+        ? 'Only the highlighted siblings travel with the proof — the dimmed nodes stay secret, which is why the proof is O(log n), not the whole log.'
+        : 'Click any leaf box (or &ldquo;Inclusion Proof&rdquo;) to prove it is in the log; the tree will light up exactly the sibling hashes needed to rebuild the root.'
+    }</p>
+  `;
+}
+
+/**
+ * Exhibit 1 sign/verify flow: shows the issuer's PRIVATE key signing the
+ * selected cert's fields, and the issuer's PUBLIC key verifying that signature.
+ * For the self-signed root, issuer == subject. Keyed on the selected node so a
+ * re-render restarts the CSS animation each time a chip is picked.
+ */
+function signVerifyMarkup(state: AppState): string {
+  const node = state.selectedNode;
+  const cert = certAt(state, node);
+  const issuerName = node === 'root'
+    ? `${shortSubject(cert.issuer)} (self)`
+    : shortSubject(cert.issuer);
+  const subjectName = shortSubject(cert.subject);
+  const tampered = state.tamperedNodes.has(node);
+  const verifies = !tampered;
+
+  return `
+    <div class="signflow" role="group" aria-label="Sign and verify flow for the ${NODE_NAME[node]} certificate" data-flow-node="${node}">
+      <div class="sf-stage sf-sign">
+        <span class="sf-key sf-priv" aria-hidden="true">🔑</span>
+        <span class="sf-cap"><strong>${issuerName}</strong> private key</span>
+        <span class="sf-verb">signs</span>
+        <span class="sf-payload mono">subject:${subjectName} + public key</span>
+      </div>
+      <span class="sf-arrow" aria-hidden="true">&rarr;</span>
+      <div class="sf-stage sf-sig">
+        <span class="sf-sigblob mono" aria-hidden="true">⟨signature ${cert.signature.byteLength}B⟩</span>
+      </div>
+      <span class="sf-arrow" aria-hidden="true">&rarr;</span>
+      <div class="sf-stage sf-verify">
+        <span class="sf-key sf-pub" aria-hidden="true">🔓</span>
+        <span class="sf-cap"><strong>${issuerName}</strong> public key</span>
+        <span class="sf-verb">verifies</span>
+        <span class="sf-result ${verifies ? 'pass' : 'fail'}"><span aria-hidden="true">${verifies ? '✓' : '✗'}</span> ${verifies ? 'valid' : 'invalid'}</span>
+      </div>
+    </div>
+    <p class="sf-note">Signed with the issuer&rsquo;s <strong>private</strong> key; anyone verifies with the issuer&rsquo;s <strong>public</strong> key. That asymmetry is what lets a browser check a certificate it has never seen, using only the issuer it already trusts.</p>
+  `;
+}
+
 function exhibitsMarkup(state: AppState): string {
   const selected = certAt(state, state.selectedNode);
   const compromiseSet = compromisedSubtree(state.chain, state.compromisedCa);
@@ -243,6 +574,7 @@ function exhibitsMarkup(state: AppState): string {
           <dt>Signature Size</dt><dd>${signatureBytes} bytes</dd>
         </dl>
       </div>
+      ${signVerifyMarkup(state)}
       <p class="teach"><strong>How trust flows:</strong> each certificate carries the <em>subject</em>&rsquo;s public key, signed by its <em>issuer</em>&rsquo;s private key. The Root signs itself; it signs the Intermediate; the Intermediate signs the Leaf. Trust an anchor and you transitively trust everything it vouches for &mdash; until one signature fails to verify.</p>
     </section>
 
@@ -262,13 +594,19 @@ function exhibitsMarkup(state: AppState): string {
       </fieldset>
       <ul class="step-list" aria-label="Validation steps" role="list">
         ${(state.validation?.steps ?? [])
-          .map(
-            (step) => `<li class="${step.ok ? 'pass' : 'fail'}" aria-label="${step.label}: ${step.ok ? 'passed' : 'failed'}"><strong>${step.label}:</strong> ${step.details}</li>`,
-          )
+          .map((step) => {
+            const stepNode = (['root', 'intermediate', 'leaf'] as CertNode[]).find(
+              (n) => TAMPER_STEP_LABEL[n] === step.label,
+            );
+            const anchorId = stepNode ? ` id="step-${stepNode}"` : '';
+            const flipped = stepNode && state.tamperedNodes.has(stepNode) && !step.ok ? ' flipped' : '';
+            return `<li${anchorId} class="${step.ok ? 'pass' : 'fail'}${flipped}" aria-label="${step.label}: ${step.ok ? 'passed' : 'failed'}${flipped ? ', broken by tamper' : ''}"><strong>${step.label}:</strong> ${step.details}</li>`;
+          })
           .join('')}
       </ul>
       <p class="status ${state.validation?.ok ? 'pass' : 'fail'}" role="status" aria-live="polite">Overall: ${state.validation?.ok ? 'PASS' : 'FAIL'}</p>
-      <p class="teach"><strong>Try it:</strong> a signature covers the exact bytes of the fields it signs. <em>Tamper</em> any certificate &mdash; this flips one signed field <em>after</em> issuance &mdash; and that link&rsquo;s signature check fails immediately, because the issuer never signed the altered bytes. Click again to <em>repair</em> and watch it pass. This is why an attacker cannot edit a certificate without the issuer&rsquo;s private key.</p>
+      ${tamperCouplingMarkup(state)}
+      <p class="teach"><strong>Try it:</strong> a signature covers the exact bytes of the fields it signs. <em>Tamper</em> any certificate &mdash; this flips one signed field <em>after</em> issuance &mdash; and that link&rsquo;s signature check fails immediately, because the issuer never signed the altered bytes. The panel above shows the exact bytes that changed and links to the specific check they broke. Click again to <em>repair</em> and watch it pass. This is why an attacker cannot edit a certificate without the issuer&rsquo;s private key.</p>
     </section>
 
     <section class="panel exhibit" id="exhibit-3" aria-labelledby="ex3-heading">
@@ -304,6 +642,7 @@ function exhibitsMarkup(state: AppState): string {
         <li class="${compromiseSet.has(state.chain.intermediate.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.intermediate.cert.subject)}</li>
         <li class="${compromiseSet.has(state.chain.leaf.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.leaf.cert.subject)}</li>
       </ul>
+      ${compromiseLinksMarkup(state)}
       <p class="teach"><strong>Blast radius:</strong> a stolen CA private key can mint <em>new</em> valid certificates for any name, so every certificate beneath the compromised CA must be treated as untrustworthy &mdash; even leaves that were issued correctly. Compromise the Intermediate and the Leaf falls; compromise the Root and the entire hierarchy falls. This is why Root keys live offline in HSMs and day-to-day issuance is delegated to Intermediates.</p>
       <p class="incident-note"><strong>DigiNotar 2011:</strong> attacker-issued fraudulent certificates (including google.com), prompting browser vendors to distrust the CA and break trust for all descendants.</p>
     </section>
@@ -312,17 +651,19 @@ function exhibitsMarkup(state: AppState): string {
       <h2 id="ex5-heading">Exhibit 5 &mdash; Certificate Transparency</h2>
       <p class="caption">Submit certificates to a simulated append-only log, mint SCTs, verify inclusion, and catch misissuance.</p>
       <div class="control-row">
-        <button id="ct-submit" class="btn" type="button">Submit Leaf to CT Log</button>
+        <button id="ct-submit" class="btn" type="button">Submit Certificate to CT Log</button>
         <button id="ct-proof" class="btn ghost" type="button" ${state.ctLog.size < 1 ? 'disabled' : ''}>Inclusion Proof</button>
         <button id="ct-consistency" class="btn ghost" type="button" ${state.ctLog.size < 2 ? 'disabled' : ''}>Consistency Proof</button>
         <button id="ct-misissue" class="btn danger" type="button">Simulate Misissuance</button>
       </div>
       <p>Log size: <strong>${state.ctLog.size}</strong> | Log ID: <span class="mono">${shortHex(state.ctLog.logId, 14)}</span></p>
       <p>SCT: ${state.latestSct ? `<span class="mono">${shortHex(state.latestSct.entryHash, 14)}</span> at ${new Date(state.latestSct.timestamp).toLocaleTimeString()}` : 'No SCT generated yet.'}</p>
-      <p>Inclusion proof: ${state.latestProof ? `${state.latestProof.auditPath.length} sibling hash${state.latestProof.auditPath.length === 1 ? '' : 'es'} to recompute root, verify=<strong class="${state.latestProofValid ? 'pass' : 'fail'}">${state.latestProofValid ? 'true' : 'false'}</strong>` : 'Not generated.'}</p>
+      <div class="mtree-wrap" role="region" aria-label="Merkle tree inclusion-proof visualization" tabindex="0">
+        ${merkleTreeMarkup(state)}
+      </div>
       <p>Consistency proof: ${state.latestConsistency ? `old=${state.latestConsistency.oldSize} &rarr; new=${state.latestConsistency.newSize}, path=${state.latestConsistency.proof.length} hash${state.latestConsistency.proof.length === 1 ? '' : 'es'}, verify=<strong class="${state.latestConsistencyValid ? 'pass' : 'fail'}">${state.latestConsistencyValid ? 'true' : 'false'}</strong>` : 'Not generated.'}</p>
       <p class="status ${state.misissuance?.suspicious ? 'fail' : 'pass'}" role="status" aria-live="polite">Misissuance monitor: ${state.misissuance ? state.misissuance.reason : 'No suspicious issuance observed.'}</p>
-      <p class="teach"><strong>What the proofs guarantee (RFC 6962):</strong> the <em>inclusion proof</em> shows your certificate is in the log using only ~log&#8322;(n) sibling hashes &mdash; not the whole log. The <em>consistency proof</em> shows the new tree only <em>appended</em> to the old one and rewrote no history, again with a handful of hashes. Together they make a misbehaving log detectable: it cannot hide a certificate or fork its view without producing a proof that fails to verify.</p>
+      <p class="teach"><strong>What the proofs guarantee (RFC 6962):</strong> the <em>inclusion proof</em> shows your certificate is in the log using only ~log&#8322;(n) sibling hashes (highlighted above) &mdash; not the whole log. &ldquo;verify=true&rdquo; literally means <em>these two root hashes match</em>: the root you rebuild from the leaf plus those few siblings equals the root the log already published. The <em>consistency proof</em> shows the new tree only <em>appended</em> to the old one and rewrote no history, again with a handful of hashes. Together they make a misbehaving log detectable: it cannot hide a certificate or fork its view without producing a proof that fails to verify.</p>
     </section>
 
     <section class="panel exhibit" id="exhibit-6" aria-labelledby="ex6-heading">
@@ -366,6 +707,8 @@ async function resetLab(state: AppState): Promise<void> {
   state.pqMode = 'classical';
   state.selectedNode = 'leaf';
   state.ctLog = await createCtLog();
+  state.ctTree = null;
+  state.proofTarget = -1;
   state.latestSct = null;
   state.latestProof = null;
   state.latestProofValid = null;
@@ -446,20 +789,41 @@ function bindEvents(state: AppState): void {
   });
 
   document.querySelector<HTMLButtonElement>('#ct-submit')?.addEventListener('click', async () => {
-    state.latestSct = await state.ctLog.submitCertificate(state.chain.leaf.cert);
+    // Each submission is a distinct certificate (unique serial), so the log grows
+    // with distinct leaves and the drawn tree is a real, non-degenerate Merkle tree.
+    const entry: Certificate = {
+      ...state.chain.leaf.cert,
+      serialNumber: `${state.chain.leaf.cert.serialNumber}-${state.ctLog.size}`,
+    };
+    state.latestSct = await state.ctLog.submitCertificate(entry);
     state.latestProof = null;
     state.latestConsistency = null;
+    state.proofTarget = state.ctLog.size - 1;
+    await refreshCtTree(state);
     render(state);
   });
 
   document.querySelector<HTMLButtonElement>('#ct-proof')?.addEventListener('click', async () => {
-    const last = state.ctLog.size - 1;
-    if (last < 0) {
+    const target = state.proofTarget >= 0 && state.proofTarget < state.ctLog.size
+      ? state.proofTarget
+      : state.ctLog.size - 1;
+    if (target < 0) {
       return;
     }
-    state.latestProof = await state.ctLog.generateInclusionProof(last);
+    state.proofTarget = target;
+    state.latestProof = await state.ctLog.generateInclusionProof(target);
     state.latestProofValid = await state.ctLog.verifyInclusionProof(state.latestProof);
     render(state);
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-leaf-index]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const idx = Number(button.dataset.leafIndex);
+      state.proofTarget = idx;
+      state.latestProof = await state.ctLog.generateInclusionProof(idx);
+      state.latestProofValid = await state.ctLog.verifyInclusionProof(state.latestProof);
+      render(state);
+    });
   });
 
   document.querySelector<HTMLButtonElement>('#ct-consistency')?.addEventListener('click', async () => {
@@ -480,6 +844,8 @@ function bindEvents(state: AppState): void {
 
     await state.ctLog.submitCertificate(forged);
     state.misissuance = state.ctLog.detectMisissuance(forged, new Set([state.chain.intermediate.cert.subject]));
+    state.latestProof = null;
+    await refreshCtTree(state);
     render(state);
   });
 
@@ -507,10 +873,16 @@ async function init(): Promise<void> {
   const theme = (localStorage.getItem('theme') as Theme | null) ?? 'dark';
   document.documentElement.dataset.theme = theme;
 
+  // The pristine chain's signatures always verify — validate it once against the
+  // browser store so the compromise exhibit can show real "signatures still
+  // verify" results without re-running crypto on every render.
+  const baselineValidation = await validateChain(chain, browserStore);
+
   const state: AppState = {
     chain,
     selectedNode: 'leaf',
     validation: null,
+    baselineValidation,
     trustStores: {
       browser: browserStore,
       os: osStore,
@@ -522,6 +894,8 @@ async function init(): Promise<void> {
     revokeViaOcsp: false,
     compromisedCa: null,
     ctLog: await createCtLog(),
+    ctTree: null,
+    proofTarget: -1,
     latestSct: null,
     latestProof: null,
     latestProofValid: null,

@@ -17,7 +17,16 @@ This browser-native lab demonstrates Public Key Infrastructure (PKI) certificate
 
 **[systemslibrarian.github.io/crypto-lab-pki-chain](https://systemslibrarian.github.io/crypto-lab-pki-chain/)**
 
-The demo provides six interactive exhibits. The **Tamper / Repair** buttons toggle a single signed field on any certificate so you can flip a link between PASS and FAIL and watch WebCrypto signature verification react in real time; a **Reset lab** button restores every scenario to its defaults. Toggle **CRL** and **OCSP** checkboxes to simulate leaf revocation, switch trust store contexts (Browser / OS / Application), mark a CA as compromised to see subtree distrust, submit certificates to the simulated CT log to generate SCTs and verify **RFC 6962 Merkle inclusion and consistency proofs**, and compare classical P-256, ML-DSA, and hybrid post-quantum signature footprints drawn to scale from the live chain.
+The demo provides six interactive exhibits:
+
+1. **The Chain** — inspect the Root → Intermediate → Leaf certificates; selecting a link plays a short **sign / verify** flow showing the issuer's *private* key signing the subject's fields and the issuer's *public* key verifying, making the sign-with-private / verify-with-public asymmetry concrete.
+2. **Chain Validation** — real WebCrypto verification of every link. The **Tamper / Repair** buttons toggle a single signed field so you can flip a link between PASS and FAIL; a **cause → effect** panel shows the exact bytes appended to the signed payload and anchor-links to the specific validation step those bytes broke.
+3. **Trust Stores** — the same cryptographically valid chain accepted or rejected depending on Browser / OS / Application trust roots.
+4. **CA Compromise** — mark a CA as compromised and watch its subtree fall. A per-link contrast table shows that **signatures still verify** (the math is untouched) while the affected links are **distrusted by policy** — the opposite of the tamper case, where a signature genuinely fails.
+5. **Certificate Transparency** — submit certificates to a simulated append-only log and see the **actual RFC 6962 Merkle tree drawn as a node diagram**. Clicking a leaf (or *Inclusion Proof*) highlights the target leaf, lights up exactly the `log₂(n)` audit-path sibling hashes needed to rebuild the root, dims the rest, and shows the recomputed root next to the log's stored root so `verify=true` reads as *these two hashes match*. Consistency proofs and misissuance monitoring run on the same live log.
+6. **PQ Migration** — compare classical P-256, ML-DSA, and hybrid post-quantum signature footprints drawn to scale, with each bar tagged **measured** (computed live from this lab's chain) or **reference** (FIPS 204 spec value).
+
+A **Reset lab** button restores every scenario to its defaults, and **CRL** / **OCSP** checkboxes simulate leaf revocation.
 
 The Merkle log is implemented to RFC 6962 exactly — leaves prefixed with `0x00`, interior nodes with `0x01`, and trees split at the largest power of two with no lone-node duplication — so inclusion and consistency proofs are the same compact `O(log n)` artifacts a real CT log produces, not a recomputation over the whole log.
 
@@ -61,6 +70,7 @@ A cryptography lab should prove its own crypto, so the math is covered by an exe
 - **Revocation** — CRL and OCSP revocation each fail the leaf.
 - **CA compromise** — root compromise distrusts the whole subtree; intermediate compromise spares the root.
 - **RFC 6962 Merkle proofs** — inclusion and consistency proofs verify for every leaf and every `old < new` size up to eight, stay `O(log n)` in size, and are rejected when any root or proof node is corrupted.
+- **Drawable tree fidelity** — the tree rendered in Exhibit 5 recomputes to the same root as the log, and the sibling hashes it highlights on the audit path are exactly the RFC 6962 proof hashes — so the visualization can never light up a fabricated path.
 
 ---
 

@@ -36,6 +36,26 @@ export interface MisissuanceResult {
   reason: string;
 }
 
+/**
+ * A drawable node of the RFC 6962 Merkle tree. `level` 0 is the leaf row;
+ * `span` is the inclusive `[start, end]` leaf index range the node covers, so a
+ * renderer can lay nodes out horizontally over their leaves. `hash` is the real
+ * SHA-256 Merkle hash for that subtree — never a placeholder.
+ */
+export interface MerkleTreeNode {
+  hash: string;
+  level: number;
+  /** Inclusive leaf-index range this subtree covers. */
+  span: [number, number];
+  isLeaf: boolean;
+  children: MerkleTreeNode[];
+}
+
+/** A key that uniquely identifies a tree node by its leaf-index span. */
+export function nodeKey(node: { span: [number, number] }): string {
+  return `${node.span[0]}-${node.span[1]}`;
+}
+
 export interface CtLog {
   size: number;
   logId: string;
@@ -44,6 +64,8 @@ export interface CtLog {
   rootHash: (treeSize?: number) => Promise<string>;
   generateInclusionProof: (leafIndex: number, treeSize?: number) => Promise<InclusionProof>;
   verifyInclusionProof: (proof: InclusionProof) => Promise<boolean>;
+  /** Full drawable RFC 6962 tree with real per-node Merkle hashes. */
+  treeLayout: (treeSize?: number) => Promise<MerkleTreeNode>;
   generateConsistencyProof: (oldSize: number, newSize: number) => Promise<ConsistencyProof>;
   verifyConsistencyProof: (proof: ConsistencyProof) => Promise<boolean>;
   detectMisissuance: (
@@ -264,6 +286,35 @@ async function verifyConsistency(
   return oldHash === oldRoot && newHash === newRoot && index === path.length;
 }
 
+/**
+ * Build the drawable RFC 6962 tree from leaf hashes, recording each subtree's
+ * inclusive leaf-index span. Splits at the largest power of two below n and does
+ * NOT duplicate lone right nodes — identical to `merkleTreeHash`, so the node
+ * hashes shown to the learner are the exact ones the proofs recompute.
+ */
+async function buildTree(leafHashes: string[], offset = 0): Promise<MerkleTreeNode> {
+  const n = leafHashes.length;
+  if (n === 1) {
+    return {
+      hash: leafHashes[0],
+      level: 0,
+      span: [offset, offset],
+      isLeaf: true,
+      children: [],
+    };
+  }
+  const k = largestPowerOfTwoBelow(n);
+  const left = await buildTree(leafHashes.slice(0, k), offset);
+  const right = await buildTree(leafHashes.slice(k), offset + k);
+  return {
+    hash: await hashNode(left.hash, right.hash),
+    level: Math.max(left.level, right.level) + 1,
+    span: [offset, offset + n - 1],
+    isLeaf: false,
+    children: [left, right],
+  };
+}
+
 async function createSct(
   state: CtEngineState,
   entryHash: string,
@@ -374,6 +425,12 @@ export async function createCtLog(): Promise<CtLog> {
         auditPath: path,
         rootHash,
       };
+    },
+    async treeLayout(treeSize = state.leaves.length): Promise<MerkleTreeNode> {
+      if (treeSize < 1 || treeSize > state.leaves.length) {
+        throw new Error('Tree size out of range.');
+      }
+      return buildTree(leafHashesUpTo(treeSize));
     },
     async verifyInclusionProof(proof: InclusionProof): Promise<boolean> {
       let current = proof.leafHash;

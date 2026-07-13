@@ -99,6 +99,52 @@ describe('CT consistency proofs (RFC 6962)', () => {
   });
 });
 
+describe('CT drawable tree layout (Exhibit 5 visualization)', () => {
+  it('treeLayout root hash equals the log root and spans the whole leaf set', async () => {
+    for (let n = 1; n <= 8; n += 1) {
+      const log = await createCtLog();
+      for (const cert of await makeCerts(n)) {
+        await log.submitCertificate(cert);
+      }
+      const tree = await log.treeLayout();
+      expect(tree.hash).toBe(await log.rootHash());
+      expect(tree.span).toEqual([0, n - 1]);
+    }
+  });
+
+  it('audit-path siblings drawn on the tree are exactly the RFC 6962 proof hashes', async () => {
+    // Walk the drawable tree the same way the UI highlights it, and confirm the
+    // sibling hashes collected equal the audit path — the visualization lights up
+    // the real proof, never a fabricated set.
+    for (let n = 2; n <= 8; n += 1) {
+      const log = await createCtLog();
+      for (const cert of await makeCerts(n)) {
+        await log.submitCertificate(cert);
+      }
+      const tree = await log.treeLayout();
+
+      for (let leaf = 0; leaf < n; leaf += 1) {
+        const proof = await log.generateInclusionProof(leaf);
+        const siblingHashes: string[] = [];
+        let node = tree;
+        while (!node.isLeaf) {
+          const [left, right] = node.children;
+          if (leaf <= left.span[1]) {
+            siblingHashes.push(right.hash);
+            node = left;
+          } else {
+            siblingHashes.push(left.hash);
+            node = right;
+          }
+        }
+        // Audit path is leaf→root; the walk collects root→leaf, so compare as sets.
+        expect(new Set(siblingHashes)).toEqual(new Set(proof.auditPath.map((s) => s.hash)));
+        expect(siblingHashes.length).toBe(proof.auditPath.length);
+      }
+    }
+  });
+});
+
 describe('CT SCT minting and misissuance monitoring', () => {
   it('mints an ECDSA P-256 SCT and flags out-of-policy issuers', async () => {
     const log = await createCtLog();

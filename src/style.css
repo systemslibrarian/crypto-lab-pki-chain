@@ -354,6 +354,289 @@ code {
   background: color-mix(in oklab, var(--surface), black 8%);
 }
 
+/* ── Sign / verify flow (Exhibit 1) ── */
+
+.signflow {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: color-mix(in oklab, var(--surface), black 6%);
+}
+
+.sf-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: color-mix(in oklab, var(--surface), var(--accent) 5%);
+  flex: 1 1 12rem;
+  min-width: 9rem;
+  /* Content is always visible (opacity stays 1); the animation is a staged
+     highlight so the flow reads left→right without ever hiding the text. */
+  animation: sfReveal 0.6s ease both;
+}
+
+.sf-sign {
+  animation-delay: 0.05s;
+}
+
+.sf-sig {
+  flex: 0 1 9rem;
+  justify-content: center;
+  align-items: center;
+  animation-delay: 0.55s;
+}
+
+.sf-verify {
+  animation-delay: 1.05s;
+}
+
+.sf-arrow {
+  align-self: center;
+  font-weight: 700;
+  color: var(--accent);
+  animation: sfArrow 0.5s ease both;
+}
+
+.sf-arrow:nth-of-type(2) {
+  animation-delay: 0.45s;
+}
+
+.sf-arrow:nth-of-type(4) {
+  animation-delay: 0.95s;
+}
+
+@keyframes sfReveal {
+  0% {
+    transform: translateY(5px) scale(0.99);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent), transparent 100%);
+  }
+  40% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 55%);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent), transparent 100%);
+  }
+}
+
+@keyframes sfArrow {
+  0% {
+    transform: translateX(-4px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.sf-key {
+  font-size: 1.2rem;
+}
+
+.sf-cap {
+  font-size: 0.82rem;
+}
+
+.sf-verb {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.sf-payload,
+.sf-sigblob {
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+.sf-result {
+  font-weight: 700;
+  font-size: 0.84rem;
+  align-self: flex-start;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.4rem;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.sf-result.pass {
+  border-color: var(--ok);
+  background: color-mix(in oklab, var(--ok), var(--surface) 78%);
+}
+
+.sf-result.fail {
+  border-color: var(--fail);
+  background: color-mix(in oklab, var(--fail), var(--surface) 78%);
+}
+
+.sf-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+/* ── CA compromise: signature vs policy contrast (Exhibit 4) ── */
+
+.compromise-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.compromise-table th,
+.compromise-table td {
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.compromise-table thead th {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.compromise-table tbody th {
+  font-weight: 700;
+}
+
+.compromise-table tr.row-distrusted {
+  background: color-mix(in oklab, var(--fail), var(--surface) 84%);
+}
+
+/* Cells in a distrusted (fail-tinted) row: keep text at --text; the ✓/✗ icon
+   plus the row tint carry the state, avoiding red-on-red / green-on-red. */
+.compromise-table tr.row-distrusted td.pass,
+.compromise-table tr.row-distrusted td.fail {
+  color: var(--text);
+}
+
+.compromise-contrast {
+  margin: 0.5rem 0 0;
+  font-size: 0.88rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  border-left: 3px solid var(--border);
+  background: color-mix(in oklab, var(--surface), black 6%);
+  color: var(--text);
+}
+
+.compromise-contrast.is-compromise {
+  border-left-color: var(--fail);
+  background: color-mix(in oklab, var(--fail), var(--surface) 86%);
+}
+
+/* ── Tamper cause→effect coupling (Exhibit 2) ── */
+
+.tamper-coupling {
+  border: 1px solid var(--fail);
+  border-radius: 0.7rem;
+  background: color-mix(in oklab, var(--fail), var(--surface) 82%);
+  padding: 0.7rem 0.85rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tc-head {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.tc-diff {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  background: color-mix(in oklab, var(--surface), black 8%);
+  overflow-x: auto;
+}
+
+.tc-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.tc-label {
+  flex: 0 0 5.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.tc-bytes {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.tc-added {
+  background: color-mix(in oklab, var(--fail), var(--surface) 40%);
+  color: var(--text);
+  border-radius: 0.25rem;
+  padding: 0 0.15rem;
+  font-weight: 700;
+  outline: 1px solid var(--fail);
+}
+
+/* On the tinted coupling panel, state is carried by the panel border + icon +
+   the "FAIL/PASS" word, so keep the body text at full --text contrast. */
+.tc-effect {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tc-effect.pass,
+.tc-effect.fail {
+  color: var(--text);
+}
+
+.tc-jump {
+  color: var(--text);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.step-list li.flipped {
+  border-radius: 0.4rem;
+  padding: 0.1rem 0.4rem;
+  margin-left: -0.4rem;
+  background: color-mix(in oklab, var(--fail), var(--surface) 74%);
+  outline: 2px solid var(--fail);
+  animation: flipFlash 0.9s ease;
+}
+
+/* On the flashed fail-tinted background the semantic --fail red on red is too
+   low-contrast; the outline + background already signal the break, so use full
+   --text for the words. */
+.step-list li.flipped,
+.step-list li.flipped strong {
+  color: var(--text);
+}
+
+@keyframes flipFlash {
+  0% {
+    background: color-mix(in oklab, var(--fail), var(--surface) 40%);
+  }
+  100% {
+    background: color-mix(in oklab, var(--fail), var(--surface) 74%);
+  }
+}
+
 /* ── PQ signature-size bars ── */
 
 .pq-bars {
@@ -429,6 +712,206 @@ code {
   .pq-bar-track {
     grid-area: track;
   }
+}
+
+/* ── Merkle tree (Certificate Transparency, Exhibit 5) ── */
+
+.mtree-wrap {
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: color-mix(in oklab, var(--surface), black 7%);
+  padding: 0.9rem 0.7rem;
+  overflow-x: auto;
+}
+
+.ct-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mtree {
+  display: grid;
+  gap: 1.2rem;
+  min-width: max-content;
+  margin: 0 auto 0.4rem;
+}
+
+.mtree-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: nowrap;
+}
+
+.mtree-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 4.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: color-mix(in oklab, var(--surface), var(--accent) 5%);
+  color: var(--text);
+  font-size: 0.8rem;
+  transition:
+    opacity 0.35s ease,
+    border-color 0.35s ease,
+    background 0.35s ease,
+    transform 0.35s ease;
+}
+
+button.mtree-node {
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.mtree-node.branch {
+  border-style: dashed;
+}
+
+.mtree-node .mtree-tag {
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
+.mtree-node.branch .mtree-tag {
+  color: var(--muted);
+}
+
+/* Highlighted / root nodes use a stronger accent-tinted fill, so their tag must
+   return to full --text contrast (muted-on-accent fails AA). */
+.mtree-node.is-root .mtree-tag,
+.mtree-node.is-ancestor .mtree-tag,
+.mtree-node.is-sibling .mtree-tag,
+.mtree-node.is-target .mtree-tag {
+  color: var(--text);
+}
+
+.mtree-node .mtree-hash {
+  font-size: 0.72rem;
+}
+
+/* Highlight roles — always paired with text/border, never colour alone. */
+.mtree-node.is-dim {
+  opacity: 0.32;
+}
+
+.mtree-node.is-target {
+  border: 2px solid var(--accent);
+  border-style: solid;
+  background: color-mix(in oklab, var(--accent), var(--surface) 55%);
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent), transparent 66%);
+}
+
+.mtree-node.is-sibling {
+  border: 2px solid var(--ok);
+  border-style: solid;
+  background: color-mix(in oklab, var(--ok), var(--surface) 70%);
+}
+
+.mtree-node.is-ancestor {
+  border-color: var(--accent);
+  border-style: solid;
+  background: color-mix(in oklab, var(--accent), var(--surface) 80%);
+}
+
+.mtree-node.is-root {
+  border: 2px solid var(--accent);
+  border-style: solid;
+  background: color-mix(in oklab, var(--accent), var(--surface) 46%);
+  font-weight: 700;
+}
+
+.mtree-legend {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.mtree-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mtree-legend .swatch {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 0.25rem;
+  border: 2px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.swatch.sw-target {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent), var(--surface) 55%);
+}
+
+.swatch.sw-sibling {
+  border-color: var(--ok);
+  background: color-mix(in oklab, var(--ok), var(--surface) 70%);
+}
+
+.swatch.sw-ancestor {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent), var(--surface) 80%);
+}
+
+.root-compare {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.9rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: color-mix(in oklab, var(--surface), black 5%);
+}
+
+.root-line {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.root-tag {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.root-hash {
+  font-size: 0.82rem;
+}
+
+.root-eq {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.root-verdict {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.ct-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  color: var(--muted);
 }
 
 /* ── Skip-link (ADA keyboard navigation) ── */
