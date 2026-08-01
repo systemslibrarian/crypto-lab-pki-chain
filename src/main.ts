@@ -216,6 +216,49 @@ const NODE_NAME: Record<CertNode, string> = {
   leaf: 'Leaf',
 };
 
+interface ScopeCard {
+  heading: string;
+  bullets: string[];
+}
+
+/**
+ * Honest scope panel: what this lab models faithfully and what it leaves out.
+ * Stated in the app, not buried in the README, because the header says "X.509 /
+ * RFC 5280" and a learner is entitled to know exactly how far that claim goes.
+ */
+const SCOPE: ScopeCard[] = [
+  {
+    heading: 'What this models faithfully',
+    bullets: [
+      'Real ECDSA P-256 over SHA-256 signing and verification via <code>crypto.subtle</code> — no simulated signatures anywhere.',
+      'The Root &rarr; Intermediate &rarr; Leaf issuance structure, including the root signing itself.',
+      'The RFC 5280 validation logic this lab exercises: issuer/subject linkage at every link, signature verification at every link, validity-window checks, and trust-anchor membership.',
+      'Revocation as a <em>separate</em> check that can fail an otherwise perfectly-signed chain — the CRL and OCSP toggles both do this.',
+      'CA compromise blast radius: a compromised issuer taints every certificate beneath it in the path.',
+      'Certificate Transparency per RFC 6962 — real Merkle inclusion and consistency proofs over real SHA-256.',
+    ],
+  },
+  {
+    heading: 'What the JSON encoding leaves out',
+    bullets: [
+      'There is <strong>no ASN.1 and no DER in this lab</strong>. A certificate is a JavaScript object; the signed bytes are its <code>JSON.stringify</code> output with a fixed field order.',
+      'So there are no <strong>parsing-differential bugs</strong> — and those are a real X.509 attack class. Historically, two parsers disagreeing about the same DER bytes has produced exploitable flaws: the null-byte-in-CN attacks, BER/DER length-encoding ambiguity, integer-overflow in length fields, and the OpenSSL name-constraints/punycode overflows. A JSON model cannot exhibit any of them, which means this lab cannot teach them.',
+      'No DER-canonical fingerprints. The trust anchor is fingerprinted over the JSON payload, so it will not match the SHA-256 fingerprint your browser shows for any real certificate.',
+      'No X.509 extensions: no <code>basicConstraints</code>/<code>pathLenConstraint</code>, no <code>keyUsage</code>/<code>extendedKeyUsage</code>, no <code>subjectAltName</code>, no name constraints, no AIA. Real path validation turns on these; here the CA/leaf distinction is positional.',
+      'No hostname verification, no wire protocol, no TLS handshake — nothing here is transported.',
+    ],
+  },
+  {
+    heading: 'Where exactness is compressed for teaching',
+    bullets: [
+      'The path is fixed at three certificates. Real validators do <em>path building</em> — searching a pool of candidate issuers, possibly finding several valid paths or none.',
+      'CRL and OCSP are modelled as an in-memory set of revoked serials and a status map. There is no CRL file format, no signed OCSP response, no nonce, no stapling, and no soft-fail behaviour — all of which are where revocation actually goes wrong in practice.',
+      '&ldquo;Tamper&rdquo; appends a marker to a signed field after issuance. That is a deliberately obvious modification; the point being demonstrated is that <em>any</em> change to signed bytes breaks the signature, not that this particular change is realistic.',
+      'ML-DSA signature and key sizes in Exhibit 6 are FIPS 204 reference figures, not measured — WebCrypto cannot generate ML-DSA keys. The classical P-256 bar <em>is</em> measured from this lab&rsquo;s live chain.',
+    ],
+  },
+];
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -545,8 +588,8 @@ function exhibitsMarkup(state: AppState): string {
       </div>
       <div class="cl-hero-main">
         <h1 class="cl-hero-title">PKI Chain</h1>
-        <p class="cl-hero-sub">Certificate Chain Trust &middot; X.509 &middot; RFC 5280 &middot; CT (RFC 6962)</p>
-        <p class="cl-hero-desc">Walk a Root &rarr; Intermediate &rarr; Leaf chain link-by-link, tampering, revoking, and compromising CAs while live <code>crypto.subtle</code> signatures, Merkle inclusion/consistency proofs, and PQ signature sizes recompute in the browser.</p>
+        <p class="cl-hero-sub">Certificate Chain Trust &middot; X.509 / RFC 5280 <em>semantics</em>, JSON standing in for DER &middot; CT (RFC 6962)</p>
+        <p class="cl-hero-desc">Walk a Root &rarr; Intermediate &rarr; Leaf chain link-by-link, tampering, revoking, and compromising CAs while live <code>crypto.subtle</code> signatures, Merkle inclusion/consistency proofs, and PQ signature sizes recompute in the browser. The chain, the signatures, and the validation logic are real; the <em>encoding</em> is not &mdash; see <a href="#scope">Scope</a>.</p>
       </div>
       <aside class="cl-hero-why" aria-label="Why it matters">
         <span class="cl-hero-why-label">WHY IT MATTERS</span>
@@ -575,6 +618,7 @@ function exhibitsMarkup(state: AppState): string {
         </dl>
       </div>
       ${signVerifyMarkup(state)}
+      <p class="incident-note"><strong>Encoding note:</strong> these are not real X.509 certificates. A certificate here is a JavaScript object, and the bytes that get signed are its <code>JSON.stringify</code> serialization &mdash; there is no ASN.1 or DER anywhere in this lab. Every field, relationship, and check you see is faithful to RFC 5280; the wire format is not. <a href="#scope">What that leaves out &rarr;</a></p>
       <p class="teach"><strong>How trust flows:</strong> each certificate carries the <em>subject</em>&rsquo;s public key, signed by its <em>issuer</em>&rsquo;s private key. The Root signs itself; it signs the Intermediate; the Intermediate signs the Leaf. Trust an anchor and you transitively trust everything it vouches for &mdash; until one signature fails to verify.</p>
     </section>
 
@@ -684,6 +728,21 @@ function exhibitsMarkup(state: AppState): string {
       <p><strong>Public key footprint:</strong> ${activePq.keyBytes.toLocaleString()} bytes</p>
       <p>${activePq.note}</p>
       <p class="incident-note">Compatibility note: browsers currently validate classical WebPKI signatures; PQ rollouts are expected to use hybrid certificates first. ML-DSA sizes are FIPS 204 reference values — WebCrypto cannot yet generate them.</p>
+    </section>
+
+    <section class="panel exhibit" id="scope" aria-labelledby="scope-heading">
+      <h2 id="scope-heading">Scope &mdash; what this lab does and does not model</h2>
+      <p class="caption">This demo models X.509 <em>semantics</em> &mdash; the chain, the signatures, the validation logic &mdash; with a JSON encoding standing in for DER. Everything cryptographic is real; the wire format is not.</p>
+      <div class="incident-grid">
+        ${SCOPE.map(
+          (card) => `
+          <article>
+            <h3>${card.heading}</h3>
+            <ul class="scope-list">${card.bullets.map((b) => `<li>${b}</li>`).join('')}</ul>
+          </article>`,
+        ).join('')}
+      </div>
+      <p class="teach"><strong>Why say this out loud:</strong> a demo that showed <code>JSON.stringify</code> output under a badge reading &ldquo;X.509 &middot; RFC 5280&rdquo; would teach a learner that they had seen a certificate. They have not &mdash; they have seen what a certificate <em>means</em>. Real X.509 is an ASN.1/DER structure, and a large share of the CVEs in this area live in the gap between the two: in how bytes are parsed, not in how signatures are checked. That gap is exactly what this lab omits.</p>
     </section>
 
     <footer class="panel footer-note" role="contentinfo">
