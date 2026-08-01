@@ -948,6 +948,14 @@ button.mtree-node {
   top: 0;
 }
 
+/* In the light theme --bg (#f2eee4) is a warm off-white, and on the light
+   --accent (#a65d0f) it is only 4.32:1 — just under WCAG 1.4.3. Pure white on
+   the same fill is 5.01:1. The dark theme's --bg (#0f1215) on --accent
+   (#df8b2f) already clears at 7.04:1. */
+[data-theme='light'] .skip-link {
+  color: #ffffff;
+}
+
 /* ── Screen-reader-only ── */
 
 .sr-only {
