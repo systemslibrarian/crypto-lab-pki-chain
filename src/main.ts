@@ -33,10 +33,15 @@ type PqMode = 'classical' | 'mldsa' | 'hybrid';
 interface AppState {
   chain: CertificateChain;
   selectedNode: CertNode;
+  /**
+   * The one validation of record. Every surface that reports on signatures —
+   * Exhibit 1's sign/verify badge, Exhibit 2's step list and verdict, Exhibit
+   * 3's trust decision, Exhibit 4's signature column — reads this and only
+   * this. A second, separately-computed "baseline" validation of the pristine
+   * chain used to exist for Exhibit 4's benefit; it is what let two panels make
+   * opposite claims about the same chain. Do not reintroduce one.
+   */
   validation: ValidationResult | null;
-  /** Validation of the pristine, untampered chain — its signatures always verify.
-   *  Used by the compromise exhibit to show "signatures still verify" honestly. */
-  baselineValidation: ValidationResult | null;
   trustStores: Record<TrustContext, TrustStore>;
   trustContext: TrustContext;
   tamperedNodes: Set<CertNode>;
@@ -318,14 +323,21 @@ function tamperCouplingMarkup(state: AppState): string {
 }
 
 /**
- * Exhibit 4 contrast panel: for each link, show that the cryptographic signature
- * STILL verifies (from the pristine baseline — compromise never breaks the math)
- * next to the policy trust decision (distrusted when the CA is compromised). This
- * is the whole "key stolen ≠ signature invalid" lesson made visible.
+ * Exhibit 4 contrast panel: for each link, show the cryptographic signature
+ * result next to the policy trust decision (distrusted when the CA is
+ * compromised). This is the whole "key stolen ≠ signature invalid" lesson made
+ * visible: with no tamper applied, compromising a CA drops the trust column
+ * while every signature keeps verifying.
+ *
+ * The signature column reads the LIVE validation, not the pristine baseline.
+ * Reading the baseline meant that with a tamper ALSO applied this table printed
+ * "signature verifies" — and the prose below it asserted "every signature still
+ * verifies" — for the very link Exhibit 2 was simultaneously reporting as
+ * failed. Two panels, one screen, opposite claims about the same chain.
  */
 function compromiseLinksMarkup(state: AppState): string {
   const compromiseSet = compromisedSubtree(state.chain, state.compromisedCa);
-  const steps = state.baselineValidation?.steps ?? [];
+  const steps = state.validation?.steps ?? [];
   const sigOk = (label: string): boolean => steps.find((s) => s.label === label)?.ok ?? true;
 
   const rows: Array<{ node: CertNode; sigLabel: string }> = [
@@ -349,6 +361,25 @@ function compromiseLinksMarkup(state: AppState): string {
     .join('');
 
   const anyCompromise = state.compromisedCa !== null;
+  const allSignaturesVerify = rows.every(({ sigLabel }) => sigOk(sigLabel));
+
+  // Four honest readings, because tamper and compromise are independent toggles
+  // and a learner can have both on at once.
+  let contrast: string;
+  if (anyCompromise && allSignaturesVerify) {
+    contrast =
+      'Note the split: every <strong>signature still verifies</strong> — the math is untouched — yet the affected links are <strong>distrusted by policy</strong>. That is the opposite of Exhibit 2, where tampering makes a signature genuinely <em>fail</em>. Compromise revokes <em>trust</em>; tamper breaks the <em>math</em>.';
+  } else if (anyCompromise) {
+    contrast =
+      'Both failure modes are running at once. The link marked <strong>signature fails</strong> is broken by the tamper in Exhibit 2 — that is the <em>math</em> failing. The links marked <strong>distrusted by policy</strong> have perfectly valid signatures and are rejected by <em>decision</em> alone. Repair the tamper to see compromise on its own.';
+  } else if (allSignaturesVerify) {
+    contrast =
+      'Right now all signatures verify and all links are trusted. Compromise a CA above and watch trust drop while the signatures stay valid.';
+  } else {
+    contrast =
+      'No CA is compromised, so every link is still trusted by policy — but the tampered link&rsquo;s <strong>signature fails</strong>. That is the math breaking, not a trust decision. Compromise a CA above to see the other half of the contrast.';
+  }
+
   return `
     <table class="compromise-table" aria-label="Signature validity versus policy trust per link">
       <thead>
@@ -360,11 +391,7 @@ function compromiseLinksMarkup(state: AppState): string {
       </thead>
       <tbody>${body}</tbody>
     </table>
-    <p class="compromise-contrast ${anyCompromise ? 'is-compromise' : ''}">${
-      anyCompromise
-        ? 'Note the split: every <strong>signature still verifies</strong> — the math is untouched — yet the affected links are <strong>distrusted by policy</strong>. That is the opposite of Exhibit 2, where tampering makes a signature genuinely <em>fail</em>. Compromise revokes <em>trust</em>; tamper breaks the <em>math</em>.'
-        : 'Right now all signatures verify and all links are trusted. Compromise a CA above and watch trust drop while the signatures stay valid.'
-    }</p>`;
+    <p class="compromise-contrast ${anyCompromise ? 'is-compromise' : ''}">${contrast}</p>`;
 }
 
 /** Flatten a Merkle tree into rows keyed by level (leaves at level 0). */
@@ -567,13 +594,51 @@ function signVerifyMarkup(state: AppState): string {
   `;
 }
 
+/**
+ * True when every scenario already holds the value `resetLab` would restore.
+ * The Reset button is disabled only in that state.
+ *
+ * This used to consider the tamper / revocation / compromise / trust-store
+ * knobs alone, so a learner who had submitted certificates to the CT log,
+ * switched the PQ comparison, or picked a different chain node was left with a
+ * permanently disabled Reset — and no other way to empty the log — while the
+ * README promised the button "restores every scenario to its defaults".
+ */
+function labIsPristine(state: AppState): boolean {
+  return (
+    state.tamperedNodes.size === 0 &&
+    !state.revokeViaCrl &&
+    !state.revokeViaOcsp &&
+    state.compromisedCa === null &&
+    state.trustContext === 'browser' &&
+    state.pqMode === 'classical' &&
+    state.selectedNode === 'leaf' &&
+    state.ctLog.size === 0 &&
+    state.misissuance === null
+  );
+}
+
 function exhibitsMarkup(state: AppState): string {
   const selected = certAt(state, state.selectedNode);
   const compromiseSet = compromisedSubtree(state.chain, state.compromisedCa);
   const chainTrusted = state.validation?.ok ?? false;
   const signatureBytes = selected.signature.byteLength;
-  const tamperCount = state.tamperedNodes.size;
   const activePq = pqProfiles(state).find((p) => p.mode === state.pqMode)!;
+
+  // The overall verdict names the checks that broke. It is the only part of
+  // Exhibit 2 inside an aria-live region, so "Overall: FAIL" on its own told a
+  // screen-reader user strictly less than the highlighted step list told a
+  // sighted one.
+  const validationSteps = state.validation?.steps ?? [];
+  const failedChecks = validationSteps.filter((step) => !step.ok);
+  const overallText =
+    validationSteps.length === 0
+      ? 'Overall: not yet validated.'
+      : failedChecks.length === 0
+        ? `Overall: PASS — all ${validationSteps.length} checks passed.`
+        : `Overall: FAIL — ${failedChecks.length} of ${validationSteps.length} checks failed: ${failedChecks
+            .map((step) => step.label)
+            .join(', ')}.`;
 
   const tamperLabel = (node: CertNode, name: string): string =>
     state.tamperedNodes.has(node) ? `Repair ${name}` : `Tamper ${name}`;
@@ -581,7 +646,7 @@ function exhibitsMarkup(state: AppState): string {
   return `
     <header class="cl-hero panel">
       <div class="hero-actions">
-        <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset all lab scenarios to defaults"${tamperCount === 0 && !state.revokeViaCrl && !state.revokeViaOcsp && !state.compromisedCa && state.trustContext === 'browser' ? ' disabled' : ''}>Reset lab</button>
+        <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset all lab scenarios to defaults"${labIsPristine(state) ? ' disabled' : ''}>Reset lab</button>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
           <span aria-hidden="true">${state.theme === 'dark' ? '🌙' : '☀️'}</span>
         </button>
@@ -648,7 +713,7 @@ function exhibitsMarkup(state: AppState): string {
           })
           .join('')}
       </ul>
-      <p class="status ${state.validation?.ok ? 'pass' : 'fail'}" role="status" aria-live="polite">Overall: ${state.validation?.ok ? 'PASS' : 'FAIL'}</p>
+      <p class="status ${state.validation?.ok ? 'pass' : 'fail'}" role="status" aria-live="polite">${overallText}</p>
       ${tamperCouplingMarkup(state)}
       <p class="teach"><strong>Try it:</strong> a signature covers the exact bytes of the fields it signs. <em>Tamper</em> any certificate &mdash; this flips one signed field <em>after</em> issuance &mdash; and that link&rsquo;s signature check fails immediately, because the issuer never signed the altered bytes. The panel above shows the exact bytes that changed and links to the specific check they broke. Click again to <em>repair</em> and watch it pass. This is why an attacker cannot edit a certificate without the issuer&rsquo;s private key.</p>
     </section>
@@ -903,7 +968,14 @@ function bindEvents(state: AppState): void {
 
     await state.ctLog.submitCertificate(forged);
     state.misissuance = state.ctLog.detectMisissuance(forged, new Set([state.chain.intermediate.cert.subject]));
+    // A misissuance submission appends to the same log, so it invalidates the
+    // outstanding proofs exactly as a normal submission does. Without this the
+    // consistency readout kept reporting "old=2 → new=3, verify=true" against a
+    // tree that had already grown to 4 — a verdict outliving its input.
     state.latestProof = null;
+    state.latestProofValid = null;
+    state.latestConsistency = null;
+    state.latestConsistencyValid = null;
     await refreshCtTree(state);
     render(state);
   });
@@ -932,16 +1004,12 @@ async function init(): Promise<void> {
   const theme = (localStorage.getItem('theme') as Theme | null) ?? 'dark';
   document.documentElement.dataset.theme = theme;
 
-  // The pristine chain's signatures always verify — validate it once against the
-  // browser store so the compromise exhibit can show real "signatures still
-  // verify" results without re-running crypto on every render.
-  const baselineValidation = await validateChain(chain, browserStore);
-
   const state: AppState = {
     chain,
     selectedNode: 'leaf',
+    // Filled in by recomputeValidation below, before the first render, and
+    // re-derived from the live chain on every subsequent state change.
     validation: null,
-    baselineValidation,
     trustStores: {
       browser: browserStore,
       os: osStore,
