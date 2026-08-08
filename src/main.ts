@@ -784,7 +784,7 @@ function exhibitsMarkup(state: AppState): string {
         <button class="tab ${state.pqMode === 'hybrid' ? 'active' : ''}" data-pq="hybrid" type="button" role="tab" aria-selected="${state.pqMode === 'hybrid'}">Hybrid</button>
       </div>
       <p class="caption">Signature size (bytes), drawn to scale &mdash; the classical bar is measured from this lab&rsquo;s live chain:</p>
-      <div class="pq-bars" aria-label="Signature size comparison">
+      <div class="pq-bars" role="group" aria-label="Signature size comparison">
         ${pqBarsMarkup(state)}
       </div>
       <h3>${activePq.label}</h3>

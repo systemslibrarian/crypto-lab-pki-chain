@@ -7,9 +7,14 @@
   --muted: #b8c2cc;
   --accent: #df8b2f;
   --accent-soft: #ffe0bd;
+  --accent-ink: #f0a95c;
+  --link: #f0a95c;
+  --link-hover: #ffc890;
   --border: #44515f;
   --ok: #2fb279;
-  --fail: #d05a5a;
+  /* Lightened from #d05a5a: measured 3.68:1 as the FAIL verdict on the dark
+     panels — the failure branch was the least readable text on the page. */
+  --fail: #ee8080;
   --shadow: 0 14px 30px rgba(0, 0, 0, 0.26);
   --font-body: 'IBM Plex Sans', 'Source Sans 3', sans-serif;
   --font-display: 'Fraunces', 'Iowan Old Style', serif;
@@ -25,8 +30,16 @@
   --muted: #6b5b45;
   --accent: #a65d0f;
   --accent-soft: #f3d3b1;
+  /* Text-only step of --accent. --accent is overwhelmingly a fill/border
+     colour (26 uses) and measured 3.51:1 as <strong> ink on the warm callout
+     panels; this darker step of the same hue clears AA. */
+  --accent-ink: #7a4409;
+  --link: #8a4c0a;
+  --link-hover: #6d3b07;
   --border: #b6a58b;
-  --ok: #237f55;
+  /* Darkened from #237f55: measured 4.11:1 as the PASS verdict on the warm
+     light panel, which is a darker surface than the card it was tuned on. */
+  --ok: #1b6644;
   --fail: #a23333;
   --shadow: 0 12px 24px rgba(67, 45, 24, 0.13);
 }
@@ -339,10 +352,28 @@ button {
   font-size: 0.84rem;
 }
 
+/* --muted, not --accent-soft: --accent-soft is the pale tint meant to sit ON
+   the accent in dark theme, and in light theme it is a pale tan that measured
+   1.2:1 against the page. */
 .footer-note p {
   margin: 0;
   text-align: center;
-  color: var(--accent-soft);
+  color: var(--muted);
+}
+
+/* Links had no rule at all, so every one of them fell back to the user agent's
+   default #0000EE. On the dark theme's #212933 panels that is 1.5:1 — the
+   footer's related-demo links and the in-prose "What that leaves out" link were
+   effectively unreadable. Underlined because several sit inside body copy,
+   where colour alone is not a sufficient cue (WCAG 1.4.1). */
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--link-hover);
 }
 
 /* ── Teaching callouts ── */
@@ -358,7 +389,7 @@ button {
 }
 
 .teach strong {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 code {
@@ -415,7 +446,7 @@ code {
 .sf-arrow {
   align-self: center;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-ink);
   animation: sfArrow 0.5s ease both;
 }
 
@@ -1047,7 +1078,7 @@ label {
 input[type='checkbox'] {
   width: 1.15rem;
   height: 1.15rem;
-  accent-color: var(--accent);
+  accent-color: var(--accent-ink);
 }
 
 /* ── Long hash / mono overflow ── */
