@@ -135,16 +135,18 @@ export async function expectNoHorizontalOverflow(page: Page, label: string): Pro
       return false;
     };
 
-    const widest = Array.from(document.querySelectorAll('body *'))
+    const over = Array.from(document.querySelectorAll('body *'))
       .map((el) => ({ el, r: el.getBoundingClientRect() }))
       .filter((x) => x.r.width > 0 && x.r.right > doc.clientWidth + 1)
-      .filter((x) => !clipped(x.el))
-      .sort((a, b) => b.r.right - a.r.right)[0];
+      .sort((a, b) => b.r.right - a.r.right);
+    // Prefer an unclipped culprit; fall back to the widest clipped one rather
+    // than reporting nothing, so the message always names something to look at.
+    const widest = over.filter((x) => !clipped(x.el))[0] ?? over[0];
     return {
       scrollWidth: doc.scrollWidth,
       clientWidth: doc.clientWidth,
       widest: widest
-        ? `${widest.el.tagName.toLowerCase()}${widest.el.id ? '#' + widest.el.id : ''}` +
+        ? `${clipped(widest.el) ? '[clipped] ' : ''}${widest.el.tagName.toLowerCase()}${widest.el.id ? '#' + widest.el.id : ''}` +
           `${widest.el.getAttribute('class') ? '.' + widest.el.getAttribute('class')!.trim().split(/\s+/).join('.') : ''}` +
           ` @${Math.round(widest.r.width)}px right=${Math.round(widest.r.right)}`
         : '(none identified)',
