@@ -26,7 +26,6 @@ import {
 } from './pki';
 
 type CertNode = 'root' | 'intermediate' | 'leaf';
-type Theme = 'dark' | 'light';
 type TrustContext = 'browser' | 'os' | 'application';
 type PqMode = 'classical' | 'mldsa' | 'hybrid';
 
@@ -57,7 +56,6 @@ interface AppState {
   latestConsistency: ConsistencyProof | null;
   latestConsistencyValid: boolean | null;
   misissuance: MisissuanceResult | null;
-  theme: Theme;
   pqMode: PqMode;
   rootFingerprint: string;
 }
@@ -647,9 +645,6 @@ function exhibitsMarkup(state: AppState): string {
     <header class="cl-hero panel">
       <div class="hero-actions">
         <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset all lab scenarios to defaults"${labIsPristine(state) ? ' disabled' : ''}>Reset lab</button>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">
-          <span aria-hidden="true">${state.theme === 'dark' ? '🌙' : '☀️'}</span>
-        </button>
       </div>
       <div class="cl-hero-main">
         <h1 class="cl-hero-title">PKI Chain</h1>
@@ -843,14 +838,6 @@ async function resetLab(state: AppState): Promise<void> {
 }
 
 function bindEvents(state: AppState): void {
-  const themeToggle = document.querySelector<HTMLButtonElement>('#theme-toggle');
-  themeToggle?.addEventListener('click', () => {
-    state.theme = state.theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = state.theme;
-    localStorage.setItem('theme', state.theme);
-    render(state);
-  });
-
   document.querySelector<HTMLButtonElement>('#reset-lab')?.addEventListener('click', async () => {
     await resetLab(state);
     render(state);
@@ -1001,9 +988,6 @@ async function init(): Promise<void> {
   const osStore: TrustStore = { trustedRoots: new Set() };
   const appStore: TrustStore = { trustedRoots: new Set([rootFingerprint]) };
 
-  const theme = (localStorage.getItem('theme') as Theme | null) ?? 'dark';
-  document.documentElement.dataset.theme = theme;
-
   const state: AppState = {
     chain,
     selectedNode: 'leaf',
@@ -1029,7 +1013,6 @@ async function init(): Promise<void> {
     latestConsistency: null,
     latestConsistencyValid: null,
     misissuance: null,
-    theme,
     pqMode: 'classical',
     rootFingerprint,
   };

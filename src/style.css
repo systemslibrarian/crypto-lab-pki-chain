@@ -100,8 +100,8 @@ body {
   padding-top: 3.2rem;
 }
 
-/* cl-hero keeps this demo's floating Reset/theme actions; anchor them to it and
-   reserve room so they never overlap the title on narrow widths. */
+/* cl-hero keeps this demo's floating Reset action; anchor it to the hero and
+   reserve room so it never overlaps the title on narrow widths. */
 .cl-hero {
   position: relative;
   padding: 3.4rem 1rem 1rem;
@@ -115,25 +115,6 @@ body {
   align-items: center;
   gap: 0.5rem;
   z-index: 10;
-}
-
-.theme-toggle {
-  width: 2.6rem;
-  height: 2.6rem;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--surface), var(--accent) 16%);
-  color: var(--text);
-  cursor: pointer;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-}
-
-.theme-toggle:hover {
-  background: color-mix(in oklab, var(--surface), var(--accent) 28%);
 }
 
 .eyebrow {
@@ -1059,8 +1040,7 @@ input:focus-visible {
 
 .btn,
 .tab,
-.cert-chip,
-.theme-toggle {
+.cert-chip {
   min-height: 44px;
   min-width: 44px;
   display: inline-flex;
