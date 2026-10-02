@@ -6,6 +6,8 @@ export interface Certificate {
   validFrom: string;
   validTo: string;
   serialNumber: string;
+  dnsName?: string;
+  permittedDnsSuffix?: string;
 }
 
 export interface SignedCertificate {
@@ -82,6 +84,8 @@ function certToBeSigned(cert: Omit<Certificate, 'signature'>): string {
     validFrom: cert.validFrom,
     validTo: cert.validTo,
     serialNumber: cert.serialNumber,
+    dnsName: cert.dnsName,
+    permittedDnsSuffix: cert.permittedDnsSuffix,
   });
 }
 
@@ -94,6 +98,8 @@ function unsignedCertificatePayload(cert: Certificate): Uint8Array<ArrayBuffer> 
       validFrom: cert.validFrom,
       validTo: cert.validTo,
       serialNumber: cert.serialNumber,
+    dnsName: cert.dnsName,
+    permittedDnsSuffix: cert.permittedDnsSuffix,
     }),
   );
 }
@@ -125,13 +131,14 @@ function isWithinValidityWindow(cert: Certificate, at: Date = new Date()): boole
   return at >= from && at <= to;
 }
 
-async function createCertificate(
+export async function createCertificate(
   subject: string,
   issuer: string,
   subjectPublicKey: CryptoKey,
   issuerPrivateKey: CryptoKey,
   validFrom: Date,
   validTo: Date,
+  names: { dnsName?: string; permittedDnsSuffix?: string } = {},
 ): Promise<Certificate> {
   const publicKeyJwk = await crypto.subtle.exportKey('jwk', subjectPublicKey);
   return signCertificate(
@@ -142,6 +149,7 @@ async function createCertificate(
       validFrom: validFrom.toISOString(),
       validTo: validTo.toISOString(),
       serialNumber: randomSerial(),
+      ...names,
     },
     issuerPrivateKey,
   );
@@ -358,24 +366,25 @@ export function ocspStatus(cert: Certificate, responders: OcspResponder[]): Ocsp
   return 'unknown';
 }
 
+/** Policy reachability over issuer links; this does not imply descendant key theft.
+ * Subjects are unique identifiers in this teaching graph, not a general PKI path builder.
+ */
+export function issuerDescendants(certificates: Certificate[], issuer: string | null): Set<string> {
+  const reached = new Set<string>();
+  const queue = issuer ? [issuer] : [];
+  while (queue.length) {
+    const subject = queue.shift()!;
+    if (reached.has(subject)) continue;
+    reached.add(subject);
+    for (const cert of certificates) if (cert.issuer === subject && !reached.has(cert.subject)) queue.push(cert.subject);
+  }
+  return reached;
+}
+
 export function compromisedSubtree(
   chain: CertificateChain,
   compromisedCa: CompromisedCa | null,
 ): Set<string> {
-  const untrusted = new Set<string>();
-
-  if (!compromisedCa) {
-    return untrusted;
-  }
-
-  if (compromisedCa === 'root') {
-    untrusted.add(chain.root.cert.subject);
-    untrusted.add(chain.intermediate.cert.subject);
-    untrusted.add(chain.leaf.cert.subject);
-    return untrusted;
-  }
-
-  untrusted.add(chain.intermediate.cert.subject);
-  untrusted.add(chain.leaf.cert.subject);
-  return untrusted;
+  return issuerDescendants([chain.root.cert, chain.intermediate.cert, chain.leaf.cert],
+    compromisedCa ? chain[compromisedCa].cert.subject : null);
 }

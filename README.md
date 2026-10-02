@@ -9,7 +9,7 @@ This browser-native lab demonstrates Public Key Infrastructure (PKI) certificate
 - **Learning TLS certificate chain validation** — the demo shows how browsers verify each link before trusting a server's identity.
 - **Auditing a custom certificate validator** — the tamper and revocation controls expose exactly which checks a validator must pass.
 - **Understanding CT monitoring** — useful when building a certificate log monitor or implementing CT client-side verification.
-- **Studying CA compromise blast radius** — the intermediate and root compromise scenarios show which certificates become invalid when a CA key is stolen.
+- **Studying CA compromise blast radius** — the intermediate and root compromise scenarios separate valid signatures, policy distrust, stolen keys, and identities an attacker can impersonate.
 - When you need peer-to-peer trust without a central authority, prefer web-of-trust or decentralized PKI (e.g., DANE); hierarchical PKI is the wrong model for that.
 - Do NOT treat this as a production PKI or certificate validator — it is a browser teaching demo, not a hardened CA or TLS stack.
 
@@ -22,7 +22,7 @@ The demo provides six interactive exhibits:
 1. **The Chain** — inspect the Root → Intermediate → Leaf certificates; selecting a link plays a short **sign / verify** flow showing the issuer's *private* key signing the subject's fields and the issuer's *public* key verifying, making the sign-with-private / verify-with-public asymmetry concrete.
 2. **Chain Validation** — real WebCrypto verification of every link. The **Tamper / Repair** buttons toggle a single signed field so you can flip a link between PASS and FAIL; a **cause → effect** panel shows the exact bytes appended to the signed payload and anchor-links to the specific validation step those bytes broke.
 3. **Trust Stores** — the same cryptographically valid chain accepted or rejected depending on Browser / OS / Application trust roots.
-4. **CA Compromise** — mark a CA as compromised and watch its subtree fall. A per-link contrast table shows that **signatures still verify** (the math is untouched) while the affected links are **distrusted by policy** — the opposite of the tamper case, where a signature genuinely fails.
+4. **CA Compromise** — mark a CA as compromised and watch its subtree fall. A per-link contrast table shows that **signatures still verify** (the math is untouched) while the affected links are **distrusted by policy** — the opposite of the tamper case, where a signature genuinely fails. A second experiment builds two sibling intermediates and actually signs a certificate for B’s hostname with A’s stolen key. Both the legitimate B path and the forged A path validate without a name constraint; a root-signed DNS constraint on A blocks the forgery while preserving legitimate issuance. See [architecture details](docs/sibling-compromise.md).
 5. **Certificate Transparency** — submit certificates to a simulated append-only log and see the **actual RFC 6962 Merkle tree drawn as a node diagram**. Clicking a leaf (or *Inclusion Proof*) highlights the target leaf, lights up exactly the `log₂(n)` audit-path sibling hashes needed to rebuild the root, dims the rest, and shows the recomputed root next to the log's stored root so `verify=true` reads as *these two hashes match*. Consistency proofs and misissuance monitoring run on the same live log.
 6. **PQ Migration** — compare classical P-256, ML-DSA, and hybrid post-quantum signature footprints drawn to scale, with each bar tagged **measured** (computed live from this lab's chain) or **reference** (FIPS 204 spec value).
 
@@ -33,7 +33,7 @@ The Merkle log is implemented to RFC 6962 exactly — leaves prefixed with `0x00
 ## What Can Go Wrong
 
 - **Trust anchor mismatch** — different operating systems and browsers ship different root CA bundles; a certificate trusted by Chrome may be rejected by an embedded application that pins its own trust store.
-- **CA compromise blast radius** — if an Intermediate CA private key is stolen, every leaf certificate it ever signed is retroactively untrustworthy, even if the leaf itself was issued correctly.
+- **CA compromise blast radius** — key theft does not invalidate existing signatures or reveal descendant private keys. Policy can distrust an issuer’s subtree, but an unconstrained still-trusted issuer can also mint accepted impersonations of names served by a sibling. Signed name constraints must be enforced by the client. This lab implements a DNS-only subset, not complete X.509 path validation.
 - **CRL staleness** — certificate revocation lists have a validity window; a revoked certificate may still be accepted if the relying party caches an outdated CRL and the responder is unavailable.
 - **CT log split-view attack** — without verifying consistency proofs between two tree states, a misbehaving log can show different views to different monitors, hiding a fraudulent certificate from detection.
 - **Signature algorithm confusion** — ECDSA P-256 signatures are tied to the `SHA-256` hash; using a different hash parameter at verification time silently fails rather than throwing in some WebCrypto implementations.
@@ -77,3 +77,4 @@ A cryptography lab should prove its own crypto, so the math is covered by an exe
 *Part of the [Crypto Lab](https://crypto-lab.systemslibrarian.dev/) suite.*
 
 *"So whether you eat or drink or whatever you do, do it all for the glory of God." — 1 Corinthians 10:31*
+

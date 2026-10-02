@@ -678,3 +678,25 @@ test('no element carrying the hidden attribute is actually rendered', async ({ p
   });
   expect(leaks, `elements marked hidden that still render: ${JSON.stringify(leaks)}`).toEqual([]);
 });
+
+
+test('sibling key integrity differs from identity impersonation', async ({ page }) => {
+  await page.goto('.');
+  const lab = page.locator('#sibling-lab');
+  const result = lab.locator('#sibling-result');
+  await lab.locator('#sibling-run').click();
+  await expect(result).toContainText('Root-signed name constraint: REJECTS');
+  await expect(result).toContainText('Forged leaf signature: VERIFIED');
+  await expect(result).toContainText('B’s legitimate identity: ACCEPTED');
+  await lab.locator('select').selectOption('unconstrained');
+  await expect(result).toContainText('Previous results retired');
+  await expect(result.locator('li')).toHaveCount(0);
+  await lab.locator('#sibling-run').click();
+  await expect(result).toContainText('Attacker identity: ACCEPTED — IMPERSONATION');
+  await expect(result).toContainText('Chain checks: PASS');
+  await expect(result.locator('li').filter({ hasText: 'key STOLEN' })).toHaveCount(1);
+  await expect(result).toContainText('An intact sibling key does not prevent impersonation');
+  await page.locator('#reset-lab').click();
+  await expect(page.locator('#sibling-result')).toHaveText('Not run.');
+  await expect(page.locator('#sibling-policy')).toHaveValue('constrained');
+});
