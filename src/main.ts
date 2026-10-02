@@ -1,3 +1,4 @@
+import { siblingsView } from './siblings-view';
 import './style.css';
 import {
   createCtLog,
@@ -604,6 +605,7 @@ function signVerifyMarkup(state: AppState): string {
  */
 function labIsPristine(state: AppState): boolean {
   return (
+    !siblingDirty &&
     state.tamperedNodes.size === 0 &&
     !state.revokeViaCrl &&
     !state.revokeViaOcsp &&
@@ -747,7 +749,8 @@ function exhibitsMarkup(state: AppState): string {
         <li class="${compromiseSet.has(state.chain.leaf.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.leaf.cert.subject)}</li>
       </ul>
       ${compromiseLinksMarkup(state)}
-      <p class="teach"><strong>Blast radius:</strong> a stolen CA private key can mint <em>new</em> valid certificates for any name, so every certificate beneath the compromised CA must be treated as untrustworthy &mdash; even leaves that were issued correctly. Compromise the Intermediate and the Leaf falls; compromise the Root and the entire hierarchy falls. This is why Root keys live offline in HSMs and day-to-day issuance is delegated to Intermediates.</p>
+      <div id="sibling-mount"></div>
+      <p class="teach"><strong>Blast radius:</strong> an unconstrained stolen CA private key can mint <em>new</em> valid certificates for names outside its existing subtree, so every certificate beneath the compromised CA must be treated as untrustworthy &mdash; even leaves that were issued correctly. Compromise the Intermediate and the Leaf falls; compromise the Root and the entire hierarchy falls. This is why Root keys live offline in HSMs and day-to-day issuance is delegated to Intermediates.</p>
       <p class="incident-note"><strong>DigiNotar 2011:</strong> attacker-issued fraudulent certificates (including google.com), prompting browser vendors to distrust the CA and break trust for all descendants.</p>
     </section>
 
@@ -839,6 +842,8 @@ async function resetLab(state: AppState): Promise<void> {
 
 function bindEvents(state: AppState): void {
   document.querySelector<HTMLButtonElement>('#reset-lab')?.addEventListener('click', async () => {
+    siblingDirty = false;
+    siblingView = undefined;
     await resetLab(state);
     render(state);
   });
@@ -975,9 +980,18 @@ function bindEvents(state: AppState): void {
   });
 }
 
+let siblingView: HTMLElement | undefined;
+let siblingDirty = false;
+
 function render(state: AppState): void {
   app!.innerHTML = `<main class="page">${exhibitsMarkup(state)}</main>`;
   bindEvents(state);
+  siblingView ??= siblingsView(() => {
+    siblingDirty = true;
+    const reset = document.querySelector<HTMLButtonElement>('#reset-lab');
+    if (reset) reset.disabled = false;
+  });
+  app!.querySelector('#sibling-mount')?.replaceWith(siblingView);
 }
 
 async function init(): Promise<void> {
@@ -1022,3 +1036,4 @@ async function init(): Promise<void> {
 }
 
 void init();
+
