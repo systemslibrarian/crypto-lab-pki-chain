@@ -248,14 +248,14 @@ const SCOPE: ScopeCard[] = [
       'There is <strong>no ASN.1 and no DER in this lab</strong>. A certificate is a JavaScript object; the signed bytes are its <code>JSON.stringify</code> output with a fixed field order.',
       'So there are no <strong>parsing-differential bugs</strong> — and those are a real X.509 attack class. Historically, two parsers disagreeing about the same DER bytes has produced exploitable flaws: the null-byte-in-CN attacks, BER/DER length-encoding ambiguity, integer-overflow in length fields, and the OpenSSL name-constraints/punycode overflows. A JSON model cannot exhibit any of them, which means this lab cannot teach them.',
       'No DER-canonical fingerprints. The trust anchor is fingerprinted over the JSON payload, so it will not match the SHA-256 fingerprint your browser shows for any real certificate.',
-      'No X.509 extensions: no <code>basicConstraints</code>/<code>pathLenConstraint</code>, no <code>keyUsage</code>/<code>extendedKeyUsage</code>, no <code>subjectAltName</code>, no name constraints, no AIA. Real path validation turns on these; here the CA/leaf distinction is positional.',
-      'No hostname verification, no wire protocol, no TLS handshake — nothing here is transported.',
+      'No X.509 extensions: no <code>basicConstraints</code>/<code>pathLenConstraint</code>, no <code>keyUsage</code>/<code>extendedKeyUsage</code>, no DER <code>subjectAltName</code> or <code>nameConstraints</code>, no AIA. The sibling experiment instead signs JSON DNS-name and suffix-permission fields and enforces a DNS-only subset; the CA/leaf distinction remains positional.',
+      'The original chain has no hostname verification. The sibling experiment checks an exact requested DNS name. Neither runs a wire protocol or TLS handshake — nothing here is transported.',
     ],
   },
   {
     heading: 'Where exactness is compressed for teaching',
     bullets: [
-      'The path is fixed at three certificates. Real validators do <em>path building</em> — searching a pool of candidate issuers, possibly finding several valid paths or none.',
+      'Each validation path is fixed at three certificates; the sibling experiment provides two such paths under one root. Real validators do <em>path building</em> — searching a pool of candidate issuers, possibly finding several valid paths or none.',
       'CRL and OCSP are modelled as an in-memory set of revoked serials and a status map. There is no CRL file format, no signed OCSP response, no nonce, no stapling, and no soft-fail behaviour — all of which are where revocation actually goes wrong in practice.',
       '&ldquo;Tamper&rdquo; appends a marker to a signed field after issuance. That is a deliberately obvious modification; the point being demonstrated is that <em>any</em> change to signed bytes breaks the signature, not that this particular change is realistic.',
       'ML-DSA signature and key sizes in Exhibit 6 are FIPS 204 reference figures, not measured — WebCrypto cannot generate ML-DSA keys. The classical P-256 bar <em>is</em> measured from this lab&rsquo;s live chain.',
