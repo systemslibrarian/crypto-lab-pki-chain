@@ -98,8 +98,8 @@ function unsignedCertificatePayload(cert: Certificate): Uint8Array<ArrayBuffer> 
       validFrom: cert.validFrom,
       validTo: cert.validTo,
       serialNumber: cert.serialNumber,
-    dnsName: cert.dnsName,
-    permittedDnsSuffix: cert.permittedDnsSuffix,
+      dnsName: cert.dnsName,
+      permittedDnsSuffix: cert.permittedDnsSuffix,
     }),
   );
 }
