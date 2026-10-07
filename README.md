@@ -40,6 +40,21 @@ The Merkle log is implemented to RFC 6962 exactly — leaves prefixed with `0x00
 
 ## Real-World Usage
 
+### Certificate issuance: where trust can fail
+
+The [case study near the top of the live lab](https://systemslibrarian.github.io/crypto-lab-pki-chain/#certificate-issuance) connects certificate validation to unauthorized issuance. A client must validate the requested hostname and certificate path, and the server must prove possession of the matching private key. If an attacker obtains an accepted certificate for the target hostname and controls its matching key, intercepted or redirected connections can authenticate the attacker even though the legitimate server's key remains secret.
+
+On October 6, 2026, Google reported that hijacks of the `.gh`, `.sl`, and `.as` registries enabled unauthorized certificates for domains belonging to Google and other organizations. Its report did not attribute the incident to compromised Google systems or wrongdoing by the issuing CAs. The case illustrates how compromised domain-control evidence can undermine otherwise valid signatures. CT monitoring can expose unexpected issuance; revocation and client-side blocking are separate response mechanisms. The lab's stolen-CA-key experiment illustrates a different route to impersonation; it does not reproduce these registry hijacks.
+
+Sources:
+
+- [Dan Goodin, Ars Technica: Hackers obtain counterfeit TLS certificates for Google and other large services (October 6, 2026)](https://arstechnica.com/security/2026/10/hackers-obtain-counterfeit-tls-certificates-for-google-and-other-large-services/).
+- [Chrome Secure Web and Networking Team: Chrome's Response to Recent ccTLD Registry Hijacks (October 6, 2026)](https://blog.google/security/chromes-response-to-recent-cctld-registry-hijacks/) — primary incident report.
+- [RFC 8446 §4.4.3](https://www.rfc-editor.org/rfc/rfc8446.html#section-4.4.3) — TLS proof of private-key possession; [RFC 9525 §6](https://www.rfc-editor.org/rfc/rfc9525.html#section-6) — service-identity verification.
+- [How CT works](https://certificate.transparency.dev/howctworks/) — public logs and monitoring.
+
+### Where these mechanisms are used
+
 - **Let's Encrypt** — issues certificates using ECDSA P-256 chains and submits every certificate to at least two CT logs as required by the CA/Browser Forum Baseline Requirements.
 - **Google Chrome** — has enforced CT inclusion for all publicly trusted TLS certificates since April 2018; connections to sites with certificates not logged in a trusted CT log are rejected.
 - **Apple platforms** — Safari and iOS enforce CT policy requiring certificates to include SCTs from at least two approved logs before the TLS handshake is accepted.
