@@ -655,9 +655,21 @@ function exhibitsMarkup(state: AppState): string {
       </div>
       <aside class="cl-hero-why" aria-label="Why it matters">
         <span class="cl-hero-why-label">WHY IT MATTERS</span>
-        <p class="cl-hero-why-text">Every HTTPS connection rests on this chain. One stolen CA key or an unlisted root can silently forge trusted certificates for any site &mdash; so knowing how validation, revocation, and Certificate Transparency actually contain that blast radius is core web security.</p>
+        <p class="cl-hero-why-text">Publicly trusted HTTPS depends on correct certificate issuance as well as strong cryptography. A stolen CA key or hijacked domain-validation path can put a valid certificate in an attacker&rsquo;s hands. <a href="#certificate-issuance">See the real-world example</a>, then explore validation, revocation, and Certificate Transparency below.</p>
       </aside>
     </header>
+
+    <section class="panel exhibit" id="certificate-issuance" aria-labelledby="issuance-heading">
+      <h2 id="issuance-heading">Certificate issuance: where trust can fail</h2>
+      <p>An X.509 TLS server certificate binds a hostname to a public key through a CA&rsquo;s digital signature. The client checks the hostname, certificate chain, validity, and applicable trust policy; the server also proves possession of the matching private key during the handshake. Authentication depends on the issuer having authorized the <em>right</em> party to use that hostname.</p>
+      <p>An attacker who obtains an unauthorized certificate and controls its matching private key can impersonate the named site to clients that accept it, if the attacker can intercept or redirect their connections. <strong>The legitimate server&rsquo;s private key need not be stolen, and the certificate&rsquo;s signature can still verify.</strong></p>
+      <article class="teach" aria-labelledby="registry-hijack-heading">
+        <h3 id="registry-hijack-heading">In the news &mdash; <time datetime="2026-10-06">October 6, 2026</time></h3>
+        <p>Google reported hijacks of the <code>.gh</code>, <code>.sl</code>, and <code>.as</code> registries: attackers changed authoritative DNS records and obtained unauthorized certificates for some Google and other organizations&rsquo; domains. Google said its systems were not compromised and it had no reason to believe the issuing CAs had acted improperly. This illustrates a failure of the domain-control evidence used for issuance.</p>
+        <p>Read <a href="https://arstechnica.com/security/2026/10/hackers-obtain-counterfeit-tls-certificates-for-google-and-other-large-services/" target="_blank" rel="noopener noreferrer">Dan Goodin&rsquo;s Ars Technica report</a> and <a href="https://blog.google/security/chromes-response-to-recent-cctld-registry-hijacks/" target="_blank" rel="noopener noreferrer">Google&rsquo;s incident response</a>.</p>
+      </article>
+      <p><strong>Connect it to the lab:</strong> compare <a href="#exhibit-2">signature validation and revocation</a> with the separate <a href="#sibling-lab">stolen-CA-key impersonation experiment</a>. Then explore <a href="#exhibit-5">Certificate Transparency</a>: logging makes issuance visible for monitoring; it does not establish that issuance was authorized. Detection must lead to a response, such as revocation or client-side blocking. This case study supplies real-world context; the lab does not simulate the registry hijack or a TLS handshake.</p>
+    </section>
 
     <section class="panel exhibit" id="exhibit-1" aria-labelledby="ex1-heading">
       <h2 id="ex1-heading">Exhibit 1 &mdash; The Chain</h2>
