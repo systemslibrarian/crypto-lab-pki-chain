@@ -8,15 +8,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test tests/publish-request.test.mjs",
     "test:watch": "vitest",
     "test:a11y": "playwright test",
-    "deploy": "vite build && gh-pages -d dist"
+    "deploy": "gh workflow run pages.yml --repo systemslibrarian/crypto-lab-pki-chain --ref main"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
-    "gh-pages": "^6.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.2",
     "vitest": "^5.0.3"
