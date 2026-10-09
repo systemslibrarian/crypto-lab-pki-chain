@@ -19,17 +19,24 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm install
+      - run: npm ci
       - run: npx tsc --noEmit
-      - run: npm test --if-present
+      - run: npm test
       - run: npm run build
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+      # Separate the OS packages from the browser download so a stalled stage
+      # is identifiable and cannot occupy the runner indefinitely.
+      - name: Install Playwright OS dependencies
+        timeout-minutes: 5
+        run: npx playwright install-deps chromium
+      - name: Download Playwright browser
+        timeout-minutes: 5
+        run: npx playwright install chromium
       - name: Accessibility gate (axe-core, WCAG A/AA)
         run: npm run test:a11y
       - uses: actions/upload-pages-artifact@v5
