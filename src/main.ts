@@ -380,6 +380,7 @@ function compromiseLinksMarkup(state: AppState): string {
   }
 
   return `
+    <div class="compromise-table-wrap" tabindex="0" role="region" aria-label="Signature and trust comparison (scrollable)">
     <table class="compromise-table" aria-label="Signature validity versus policy trust per link">
       <thead>
         <tr>
@@ -390,6 +391,7 @@ function compromiseLinksMarkup(state: AppState): string {
       </thead>
       <tbody>${body}</tbody>
     </table>
+    </div>
     <p class="compromise-contrast ${anyCompromise ? 'is-compromise' : ''}">${contrast}</p>`;
 }
 

@@ -83,6 +83,7 @@ A cryptography lab should prove its own crypto, so the math is covered by an exe
 
 - **Chain validation** — a well-formed chain passes; tampering any signed field breaks that link's signature; an unknown trust anchor is rejected.
 - **Intermediate validity** — genuinely root-signed expired and not-yet-valid intermediates fail the core validator while their signatures and the root/leaf dates still pass. Inclusive `notBefore`/`notAfter` boundaries and a currently valid intermediate pass; a reversed interval fails. All three certificates use one validation instant, with an explicit intermediate date step ([RFC 5280 §6.1.3(a)(2)](https://www.rfc-editor.org/rfc/rfc5280.html#section-6.1.3)). This remains the lab's simplified JSON certificate model, not a complete RFC 5280 implementation.
+- **Narrow-screen validation** — normal and tampered states fit 320px, 380px and desktop viewports. The signature/trust table retains its columns in a focusable horizontal scroll region; scope identifiers can wrap instead of widening the page.
 - **Revocation** — CRL and OCSP revocation each fail the leaf.
 - **CA compromise** — root compromise distrusts the whole subtree; intermediate compromise spares the root.
 - **RFC 6962 Merkle proofs** — inclusion and consistency proofs verify for every leaf and every `old < new` size up to eight, stay `O(log n)` in size, and are rejected when any root or proof node is corrupted.
