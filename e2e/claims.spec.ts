@@ -55,6 +55,15 @@ async function open(page: Page): Promise<void> {
   await expect(page.locator('.step-list li').first()).toBeVisible();
 }
 
+test('the normal chain visibly checks intermediate dates along with root and leaf', async ({ page }) => {
+  await open(page);
+  const rendered = await steps(page);
+  for (const node of ['Root', 'Intermediate', 'Leaf']) {
+    expect(rendered.find(s => s.label === `${node} validity window`)?.ok).toBe(true);
+  }
+  await expectVerdictMatchesSteps(page);
+});
+
 /** The validation step list exactly as rendered. */
 async function steps(page: Page): Promise<{ label: string; ok: boolean }[]> {
   return page.locator('.step-list li').evaluateAll((items) =>

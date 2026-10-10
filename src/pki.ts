@@ -232,8 +232,10 @@ export async function validateChain(
   ocspResponders: OcspResponder[] = [],
 ): Promise<ValidationResult> {
   const steps: ValidationStep[] = [];
+  // Evaluate every certificate against one validation instant.
+  const at = new Date();
 
-  const rootWithinDate = isWithinValidityWindow(chain.root.cert);
+  const rootWithinDate = isWithinValidityWindow(chain.root.cert, at);
   addStep(
     steps,
     'Root validity window',
@@ -270,6 +272,16 @@ export async function validateChain(
     interSig ? 'Intermediate certificate signature verifies against root key.' : 'Intermediate signature is invalid.',
   );
 
+  const interWithinDate = isWithinValidityWindow(chain.intermediate.cert, at);
+  addStep(
+    steps,
+    'Intermediate validity window',
+    interWithinDate,
+    interWithinDate
+      ? 'Intermediate certificate is within validity period.'
+      : 'Intermediate certificate is expired or not yet valid.',
+  );
+
   const leafIssuerMatch = chain.leaf.cert.issuer === chain.intermediate.cert.subject;
   addStep(
     steps,
@@ -288,7 +300,7 @@ export async function validateChain(
     leafSig ? 'Leaf certificate signature verifies against intermediate key.' : 'Leaf signature is invalid.',
   );
 
-  const leafWithinDate = isWithinValidityWindow(chain.leaf.cert);
+  const leafWithinDate = isWithinValidityWindow(chain.leaf.cert, at);
   addStep(
     steps,
     'Leaf validity window',
