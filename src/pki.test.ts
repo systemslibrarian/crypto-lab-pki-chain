@@ -5,6 +5,7 @@ import {
   validateChain,
   createCrl,
   createOcspResponder,
+  createSignedOcspResponse,
   compromisedSubtree,
   type CertificateChain,
   type TrustStore,
@@ -19,6 +20,84 @@ describe('PKI chain validation', () => {
 
     expect(result.ok).toBe(true);
     expect(result.steps.every((step) => step.ok)).toBe(true);
+    expect(result.steps.find((step) => step.label === 'CRL revocation check')?.evidence).toBe('missing');
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('missing');
+    expect(result.steps.find((step) => step.label === 'Revocation evidence policy')?.details).toContain('Fail-open');
+  });
+
+  it('rejects missing evidence under a strict policy without claiming revocation', async () => {
+    const chain = await createDemoChain();
+    const result = await validateChain(chain, await createTrustStore(chain.root.cert), [], [], {
+      revocationPolicy: 'require-current-good',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('missing');
+    expect(result.steps.filter((step) => !step.ok).map((step) => step.label)).toEqual(['Revocation evidence policy']);
+  });
+
+  it('accepts both current issuer-signed good responses under strict policy', async () => {
+    const chain = await createDemoChain();
+    const before = new Date(Date.now() - 60_000);
+    const after = new Date(Date.now() + 60_000);
+    const signed = [
+      await createSignedOcspResponse(chain.leaf.cert, chain.intermediate.keyPair.privateKey, 'good', before, after),
+      await createSignedOcspResponse(chain.intermediate.cert, chain.root.keyPair.privateKey, 'good', before, after),
+    ];
+    const result = await validateChain(chain, await createTrustStore(chain.root.cert), [], [], {
+      revocationPolicy: 'require-current-good', signedOcspResponses: signed,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('good');
+    expect(result.steps.find((step) => step.label === 'CRL revocation check')?.evidence).toBe('missing');
+  });
+
+  it('does not confuse signed-but-stale good with a current good response', async () => {
+    const chain = await createDemoChain();
+    const signed = [
+      await createSignedOcspResponse(chain.leaf.cert, chain.intermediate.keyPair.privateKey, 'good',
+        new Date(Date.now() - 172_800_000), new Date(Date.now() - 86_400_000)),
+      await createSignedOcspResponse(chain.intermediate.cert, chain.root.keyPair.privateKey, 'good',
+        new Date(Date.now() - 60_000), new Date(Date.now() + 60_000)),
+    ];
+    const result = await validateChain(chain, await createTrustStore(chain.root.cert), [], [], {
+      revocationPolicy: 'require-current-good', signedOcspResponses: signed,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('stale');
+  });
+
+  it('does not accept a response signed by the certificate rather than its direct issuer', async () => {
+    const chain = await createDemoChain();
+    const signed = [await createSignedOcspResponse(chain.leaf.cert, chain.leaf.keyPair.privateKey,
+      'good', new Date(Date.now() - 60_000), new Date(Date.now() + 60_000))];
+    const result = await validateChain(chain, await createTrustStore(chain.root.cert), [], [], {
+      revocationPolicy: 'require-current-good', signedOcspResponses: signed,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('unauthorized');
+  });
+
+  it('rejects an authenticated current revoked status even with fail-open policy', async () => {
+    const chain = await createDemoChain();
+    const signed = [await createSignedOcspResponse(chain.leaf.cert, chain.intermediate.keyPair.privateKey,
+      'revoked', new Date(Date.now() - 60_000), new Date(Date.now() + 60_000))];
+    const result = await validateChain(chain, await createTrustStore(chain.root.cert), [], [], {
+      signedOcspResponses: signed,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('revoked');
+  });
+
+  it('does not treat unsigned good status maps as authenticated positive evidence', async () => {
+    const chain = await createDemoChain();
+    const toy = createOcspResponder(chain.leaf.cert.issuer, [
+      { serialNumber: chain.leaf.cert.serialNumber, status: 'good' },
+    ]);
+    const result = await validateChain(chain, await createTrustStore(chain.root.cert), [], [toy], {
+      revocationPolicy: 'require-current-good',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.steps.find((step) => step.label === 'OCSP revocation check')?.evidence).toBe('unknown');
   });
 
   it('rejects a chain whose root is absent from the trust store', async () => {

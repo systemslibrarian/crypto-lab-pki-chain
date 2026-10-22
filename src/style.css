@@ -15,6 +15,7 @@
   /* Lightened from #d05a5a: measured 3.68:1 as the FAIL verdict on the dark
      panels — the failure branch was the least readable text on the page. */
   --fail: #ee8080;
+  --unknown: #ffd07a;
   --shadow: 0 14px 30px rgba(0, 0, 0, 0.26);
   --font-body: 'IBM Plex Sans', 'Source Sans 3', sans-serif;
   --font-display: 'Fraunces', 'Iowan Old Style', serif;
@@ -41,6 +42,7 @@
      light panel, which is a darker surface than the card it was tuned on. */
   --ok: #1b6644;
   --fail: #a23333;
+  --unknown: #81500d;
   --shadow: 0 12px 24px rgba(67, 45, 24, 0.13);
 }
 
@@ -295,6 +297,10 @@ button {
 
 .fail {
   color: var(--fail);
+}
+
+.unknown {
+  color: var(--unknown);
 }
 
 .incident-grid {
@@ -1033,6 +1039,20 @@ input:focus-visible {
   border: none;
   margin: 0;
   padding: 0;
+}
+
+#exhibit-2 select {
+  max-width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.35rem;
+}
+
+.revocation-fieldset label {
+  flex-wrap: wrap;
 }
 
 /* ── Reduced motion (ADA) ── */

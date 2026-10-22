@@ -37,9 +37,30 @@ export interface OcspResponder {
   statusBySerial: Map<string, OcspStatus>;
 }
 
+/** A deliberately small issuer-signed JSON response, not an RFC 6960 ASN.1 response. */
+export interface SignedOcspResponse {
+  issuer: string;
+  serialNumber: string;
+  status: OcspStatus;
+  thisUpdate: string;
+  nextUpdate: string;
+  signature: ArrayBuffer;
+}
+
+export type RevocationPolicy = 'allow-unknown' | 'require-current-good';
+export type EvidenceState = 'passed' | 'failed' | 'good' | 'revoked' | 'missing' | 'unknown' | 'stale' | 'unauthorized';
+
+export interface ValidationOptions {
+  revocationPolicy?: RevocationPolicy;
+  signedOcspResponses?: SignedOcspResponse[];
+}
+
 export interface ValidationStep {
   label: string;
+  /** Whether this step permits the chain under the selected policy. */
   ok: boolean;
+  /** What the demonstration actually observed, independently of policy. */
+  evidence: EvidenceState;
   details: string;
 }
 
@@ -155,8 +176,64 @@ export async function createCertificate(
   );
 }
 
-function addStep(steps: ValidationStep[], label: string, ok: boolean, details: string): void {
-  steps.push({ label, ok, details });
+function addStep(
+  steps: ValidationStep[], label: string, ok: boolean, details: string,
+  evidence: EvidenceState = ok ? 'passed' : 'failed',
+): void {
+  steps.push({ label, ok, evidence, details });
+}
+
+function ocspPayload(response: Omit<SignedOcspResponse, 'signature'>): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(JSON.stringify({
+    issuer: response.issuer,
+    serialNumber: response.serialNumber,
+    status: response.status,
+    thisUpdate: response.thisUpdate,
+    nextUpdate: response.nextUpdate,
+  }));
+}
+
+export async function createSignedOcspResponse(
+  cert: Certificate,
+  issuerPrivateKey: CryptoKey,
+  status: OcspStatus,
+  thisUpdate: Date,
+  nextUpdate: Date,
+): Promise<SignedOcspResponse> {
+  const response = {
+    issuer: cert.issuer,
+    serialNumber: cert.serialNumber,
+    status,
+    thisUpdate: thisUpdate.toISOString(),
+    nextUpdate: nextUpdate.toISOString(),
+  };
+  return { ...response, signature: await crypto.subtle.sign(SIGN_PARAMS, issuerPrivateKey, ocspPayload(response)) };
+}
+
+type CertificateEvidence = 'good' | 'revoked' | 'missing' | 'unknown' | 'stale' | 'unauthorized';
+
+async function signedOcspEvidence(
+  cert: Certificate,
+  issuerPublicKey: CryptoKey,
+  responses: SignedOcspResponse[],
+  at: Date,
+): Promise<CertificateEvidence> {
+  const response = responses.find((item) => item.issuer === cert.issuer && item.serialNumber === cert.serialNumber);
+  if (!response) return 'missing';
+
+  // Only the direct issuer key is authorized in this teaching subset; delegated
+  // responders need the additional authorization checks described in RFC 6960.
+  const authentic = await crypto.subtle.verify(
+    SIGN_PARAMS, issuerPublicKey, response.signature, ocspPayload(response),
+  ).catch(() => false);
+  if (!authentic) return 'unauthorized';
+
+  const from = Date.parse(response.thisUpdate);
+  const until = Date.parse(response.nextUpdate);
+  if (!Number.isFinite(from) || !Number.isFinite(until) || from >= until || at.getTime() < from || at.getTime() > until) {
+    return 'stale';
+  }
+  return response.status;
 }
 
 export async function createDemoChain(): Promise<CertificateChain> {
@@ -230,6 +307,7 @@ export async function validateChain(
   trustStore: TrustStore,
   crls: Crl[] = [],
   ocspResponders: OcspResponder[] = [],
+  options: ValidationOptions = {},
 ): Promise<ValidationResult> {
   const steps: ValidationStep[] = [];
   // Evaluate every certificate against one validation instant.
@@ -317,24 +395,62 @@ export async function validateChain(
     trusted ? 'Root certificate exists in selected trust store.' : 'Root certificate is missing from trust store.',
   );
 
+  const policy = options.revocationPolicy ?? 'allow-unknown';
   const revokedByCrl = isRevokedByCrl(chain.leaf.cert, crls) || isRevokedByCrl(chain.intermediate.cert, crls);
+  const crlEvidence: EvidenceState = revokedByCrl
+    ? 'revoked'
+    : crls.some((crl) => crl.issuer === chain.leaf.cert.issuer || crl.issuer === chain.intermediate.cert.issuer)
+      ? 'unknown' : 'missing';
   addStep(
     steps,
     'CRL revocation check',
     !revokedByCrl,
-    revokedByCrl ? 'A certificate serial appears in a CRL.' : 'No certificate serial present in supplied CRLs.',
+    revokedByCrl
+      ? 'A serial appears in the supplied toy CRL; reject it.'
+      : crlEvidence === 'missing'
+        ? 'No CRL supplied. Revocation evidence is missing; absence is not proof of good status.'
+        : 'The unsigned toy CRL does not prove current, authenticated non-revocation.',
+    crlEvidence,
   );
 
-  const ocspLeaf = ocspStatus(chain.leaf.cert, ocspResponders);
-  const ocspIntermediate = ocspStatus(chain.intermediate.cert, ocspResponders);
-  const ocspGood = ocspLeaf !== 'revoked' && ocspIntermediate !== 'revoked';
+  const signed = options.signedOcspResponses ?? [];
+  const evidenceFor = async (cert: Certificate, issuerPublicKey: CryptoKey): Promise<CertificateEvidence> => {
+    const toyStatus = ocspStatus(cert, ocspResponders);
+    // A supplied revoked toy indicator remains a conservative rejection even
+    // if another scenario supplied a conflicting signed good status.
+    if (toyStatus === 'revoked') return 'revoked';
+    const signedEvidence = await signedOcspEvidence(cert, issuerPublicKey, signed, at);
+    if (signedEvidence !== 'missing') return signedEvidence;
+    // An unsigned status map cannot serve as authenticated positive evidence.
+    return ocspResponders.some((r) => r.issuer === cert.issuer) ? 'unknown' : 'missing';
+  };
+  const ocspLeaf = await evidenceFor(chain.leaf.cert, chain.intermediate.keyPair.publicKey);
+  const ocspIntermediate = await evidenceFor(chain.intermediate.cert, chain.root.keyPair.publicKey);
+  const ocspRevoked = ocspLeaf === 'revoked' || ocspIntermediate === 'revoked';
+  const ocspEvidence: EvidenceState = ocspRevoked ? 'revoked'
+    : ocspLeaf === 'good' && ocspIntermediate === 'good' ? 'good'
+      : ocspLeaf === 'unauthorized' || ocspIntermediate === 'unauthorized' ? 'unauthorized'
+        : ocspLeaf === 'stale' || ocspIntermediate === 'stale' ? 'stale'
+          : ocspLeaf === 'unknown' || ocspIntermediate === 'unknown' ? 'unknown' : 'missing';
   addStep(
     steps,
     'OCSP revocation check',
-    ocspGood,
-    ocspGood
-      ? `OCSP statuses: leaf=${ocspLeaf}, intermediate=${ocspIntermediate}.`
-      : `OCSP revoked status detected: leaf=${ocspLeaf}, intermediate=${ocspIntermediate}.`,
+    !ocspRevoked && ocspEvidence !== 'unauthorized',
+    `Leaf=${ocspLeaf}, intermediate=${ocspIntermediate}. ${ocspEvidence === 'good'
+      ? 'Both current responses verified against their direct issuers.'
+      : ocspRevoked ? 'A revoked status was reported; reject the chain.'
+        : ocspEvidence === 'unauthorized' ? 'A supplied response has an invalid signer; reject it regardless of fail-open policy.'
+        : 'No current, authenticated good status for both certificates.'}`,
+    ocspEvidence,
+  );
+
+  const policyAccepts = policy === 'allow-unknown' || ocspEvidence === 'good';
+  addStep(steps, 'Revocation evidence policy', policyAccepts,
+    policy === 'allow-unknown'
+      ? 'Fail-open policy tolerates missing, unknown, or stale evidence, but never treats it as good; a supplied invalid signature fails separately.'
+      : policyAccepts
+        ? 'Strict policy has current, issuer-signed good evidence for both non-root certificates.'
+        : 'Strict policy requires current, issuer-signed good evidence for both non-root certificates.',
   );
 
   return {

@@ -7,9 +7,8 @@ import { expect, test as base, type Page } from '@playwright/test';
  * they assert is true. Everything here is anchored to a promise the README or
  * the page itself makes to a learner:
  *
- *  - the headline chain verdict is checked against the step results the page
- *    computed, never against a baked-in string, and its counts are required to
- *    add up (failed + passed == steps rendered);
+ *  - the headline chain verdict is checked against policy decisions and
+ *    evidence states separately; missing evidence must not render green;
  *  - every failure path — tamper at each of the three links, CRL revocation,
  *    OCSP revocation, an unknown trust anchor — must genuinely fail validation
  *    AND name which link or check broke;
@@ -65,11 +64,12 @@ test('the normal chain visibly checks intermediate dates along with root and lea
 });
 
 /** The validation step list exactly as rendered. */
-async function steps(page: Page): Promise<{ label: string; ok: boolean }[]> {
+async function steps(page: Page): Promise<{ label: string; ok: boolean; evidence: string }[]> {
   return page.locator('.step-list li').evaluateAll((items) =>
     items.map((li) => ({
       label: (li.querySelector('strong')?.textContent ?? '').replace(/:$/, '').trim(),
-      ok: li.classList.contains('pass'),
+      ok: li.getAttribute('data-accepted') === 'true',
+      evidence: li.getAttribute('data-evidence') ?? '',
     })),
   );
 }
@@ -79,26 +79,27 @@ async function overall(page: Page): Promise<string> {
 }
 
 /**
- * The headline verdict must be derived from the steps beside it: PASS only when
- * every rendered step passed, FAIL naming exactly the ones that did not, with
- * counts that add up to the number of checks on screen.
+ * The verdict follows policy acceptance while the list preserves evidence.
  */
-async function expectVerdictMatchesSteps(page: Page): Promise<{ label: string; ok: boolean }[]> {
+async function expectVerdictMatchesSteps(page: Page): Promise<{ label: string; ok: boolean; evidence: string }[]> {
   const rendered = await steps(page);
   expect(rendered.length, 'the validator must render its checks').toBeGreaterThan(0);
   const failed = rendered.filter((s) => !s.ok);
+  const inconclusive = rendered.filter((s) => !['passed', 'failed', 'good', 'revoked'].includes(s.evidence));
   const verdict = await overall(page);
 
   if (failed.length === 0) {
-    expect(verdict).toBe(`Overall: PASS — all ${rendered.length} checks passed.`);
-    await expect(page.locator('#exhibit-2 .status')).toHaveClass(/\bpass\b/);
+    if (inconclusive.length) {
+      const policy = await page.locator('#revocation-policy').inputValue();
+      expect(verdict).toContain(`Overall: ACCEPTED under ${policy === 'allow-unknown' ? 'fail-open' : 'strict'} policy — ${rendered.length - inconclusive.length} checks passed;`);
+      expect(verdict).toContain(`${inconclusive.length} revocation evidence gap`);
+      await expect(page.locator('#exhibit-2 .status')).toHaveClass(/\bunknown\b/);
+    } else {
+      expect(verdict).toBe(`Overall: PASS — all ${rendered.length} checks passed.`);
+      await expect(page.locator('#exhibit-2 .status')).toHaveClass(/\bpass\b/);
+    }
   } else {
-    // Parts must sum to the whole, and the verdict must name every broken check.
-    expect(verdict).toBe(
-      `Overall: FAIL — ${failed.length} of ${rendered.length} checks failed: ${failed
-        .map((s) => s.label)
-        .join(', ')}.`,
-    );
+    expect(verdict).toContain(`Overall: FAIL — ${failed.length} of ${rendered.length} checks failed: ${failed.map((s) => s.label).join(', ')}.`);
     await expect(page.locator('#exhibit-2 .status')).toHaveClass(/\bfail\b/);
     expect(rendered.filter((s) => s.ok).length + failed.length).toBe(rendered.length);
   }
@@ -160,12 +161,16 @@ async function expectSurfacesAgree(page: Page): Promise<void> {
 
 // --- the good chain -----------------------------------------------------------
 
-test('a well-formed chain passes every check, and the verdict says so by count', async ({
+test('the well-formed chain distinguishes valid signatures from absent revocation evidence', async ({
   page,
 }) => {
   await open(page);
   const rendered = await expectVerdictMatchesSteps(page);
   expect(rendered.every((s) => s.ok), 'the demo chain must validate out of the box').toBe(true);
+  for (const label of ['CRL revocation check', 'OCSP revocation check']) {
+    expect(rendered.find((s) => s.label === label)?.evidence).toBe('missing');
+    await expect(page.locator('.step-list li').filter({ hasText: label })).toHaveClass(/\bunknown\b/);
+  }
 
   // The checks the README promises are exercised must actually be present.
   const labels = rendered.map((s) => s.label);
@@ -281,6 +286,44 @@ test('OCSP revocation genuinely fails the chain and names the revocation check',
 
   await page.locator('#toggle-ocsp').uncheck();
   expect((await expectVerdictMatchesSteps(page)).every((s) => s.ok)).toBe(true);
+});
+
+test('signed OCSP evidence stays distinct from the fail-open or strict policy choice', async ({ page }) => {
+  await open(page);
+  await page.locator('#revocation-policy').selectOption('require-current-good');
+  let rendered = await expectVerdictMatchesSteps(page);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.evidence).toBe('missing');
+  expect(rendered.filter((s) => !s.ok).map((s) => s.label)).toEqual(['Revocation evidence policy']);
+
+  await page.locator('#ocsp-scenario').selectOption('current-good');
+  rendered = await expectVerdictMatchesSteps(page);
+  expect(rendered.every((s) => s.ok)).toBe(true);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.evidence).toBe('good');
+  await expect(page.locator('#exhibit-2 .status')).toContainText('ACCEPTED');
+
+  await page.locator('#ocsp-scenario').selectOption('stale-good');
+  rendered = await expectVerdictMatchesSteps(page);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.evidence).toBe('stale');
+  expect(rendered.filter((s) => !s.ok).map((s) => s.label)).toEqual(['Revocation evidence policy']);
+  await expect(page.locator('.step-list li[data-evidence="stale"]')).toContainText('Leaf=stale');
+
+  await page.locator('#ocsp-scenario').selectOption('wrong-signer');
+  rendered = await expectVerdictMatchesSteps(page);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.evidence).toBe('unauthorized');
+  expect(rendered.filter((s) => !s.ok).map((s) => s.label)).toEqual(['OCSP revocation check', 'Revocation evidence policy']);
+
+  await page.locator('#revocation-policy').selectOption('allow-unknown');
+  rendered = await expectVerdictMatchesSteps(page);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.ok).toBe(false);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.evidence).toBe('unauthorized');
+  await expect(page.locator('#exhibit-2 .status')).toContainText('FAIL');
+
+  await page.locator('#ocsp-scenario').selectOption('stale-good');
+  rendered = await expectVerdictMatchesSteps(page);
+  expect(rendered.every((s) => s.ok)).toBe(true);
+  expect(rendered.find((s) => s.label === 'OCSP revocation check')?.evidence).toBe('stale');
+  await expect(page.locator('#exhibit-2 .status')).toContainText('fail-open policy');
+  await expect(page.locator('#exhibit-2')).toContainText('RFC 6960');
 });
 
 test('an unknown trust anchor rejects an otherwise perfect chain', async ({ page }) => {
@@ -512,6 +555,8 @@ test('regression: Reset lab is reachable after any change, and restores everythi
   await page.locator('[data-tamper="leaf"]').click();
   await page.locator('#toggle-crl').check();
   await page.locator('#toggle-ocsp').check();
+  await page.locator('#ocsp-scenario').selectOption('stale-good');
+  await page.locator('#revocation-policy').selectOption('require-current-good');
   await page.locator('[data-compromise="root"]').click();
   await page.locator('[data-context="os"]').click();
   await page.locator('#ct-submit').click();
@@ -523,6 +568,8 @@ test('regression: Reset lab is reachable after any change, and restores everythi
   await expect(page.locator('#exhibit-5')).toContainText('Log size: 0');
   await expect(page.locator('#toggle-crl')).not.toBeChecked();
   await expect(page.locator('#toggle-ocsp')).not.toBeChecked();
+  await expect(page.locator('#ocsp-scenario')).toHaveValue('none');
+  await expect(page.locator('#revocation-policy')).toHaveValue('allow-unknown');
   await expect(page.locator('[data-compromise="none"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-context="browser"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#exhibit-5 .status')).toContainText('No suspicious issuance observed');

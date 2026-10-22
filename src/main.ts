@@ -17,6 +17,7 @@ import {
   validateChain,
   createCrl,
   createOcspResponder,
+  createSignedOcspResponse,
   compromisedSubtree,
   type Certificate,
   type CertificateChain,
@@ -24,11 +25,13 @@ import {
   type ValidationResult,
   type TrustStore,
   type CompromisedCa,
+  type RevocationPolicy,
 } from './pki';
 
 type CertNode = 'root' | 'intermediate' | 'leaf';
 type TrustContext = 'browser' | 'os' | 'application';
 type PqMode = 'classical' | 'mldsa' | 'hybrid';
+type OcspScenario = 'none' | 'current-good' | 'stale-good' | 'wrong-signer';
 
 interface AppState {
   chain: CertificateChain;
@@ -47,6 +50,8 @@ interface AppState {
   tamperedNodes: Set<CertNode>;
   revokeViaCrl: boolean;
   revokeViaOcsp: boolean;
+  revocationPolicy: RevocationPolicy;
+  ocspScenario: OcspScenario;
   compromisedCa: CompromisedCa | null;
   ctLog: CtLog;
   ctTree: MerkleTreeNode | null;
@@ -131,11 +136,29 @@ async function recomputeValidation(state: AppState): Promise<void> {
       ]
     : [];
 
+  const signedResponses = [];
+  if (state.ocspScenario !== 'none') {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const from = new Date(now - 2 * day);
+    const freshUntil = new Date(now + day);
+    const leafUntil = state.ocspScenario === 'stale-good' ? new Date(now - day) : freshUntil;
+    signedResponses.push(await createSignedOcspResponse(
+      chain.leaf.cert,
+      state.ocspScenario === 'wrong-signer' ? chain.leaf.keyPair.privateKey : chain.intermediate.keyPair.privateKey,
+      'good', from, leafUntil,
+    ));
+    signedResponses.push(await createSignedOcspResponse(
+      chain.intermediate.cert, chain.root.keyPair.privateKey, 'good', from, freshUntil,
+    ));
+  }
+
   state.validation = await validateChain(
     chain,
     state.trustStores[state.trustContext],
     crls,
     ocsp,
+    { revocationPolicy: state.revocationPolicy, signedOcspResponses: signedResponses },
   );
 }
 
@@ -256,7 +279,7 @@ const SCOPE: ScopeCard[] = [
     heading: 'Where exactness is compressed for teaching',
     bullets: [
       'Each validation path is fixed at three certificates; the sibling experiment provides two such paths under one root. Real validators do <em>path building</em> — searching a pool of candidate issuers, possibly finding several valid paths or none.',
-      'CRL and OCSP are modelled as an in-memory set of revoked serials and a status map. There is no CRL file format, no signed OCSP response, no nonce, no stapling, and no soft-fail behaviour — all of which are where revocation actually goes wrong in practice.',
+      'The CRL checkbox and revoked-status map are unsigned teaching inputs, not real CRL or OCSP protocol messages. The good/stale response toy signs JSON with the direct issuer key and checks signature and time window. There is no RFC 6960 ASN.1 encoding, delegated responder certificate, nonce, stapling, network retrieval, or real CRL signature/freshness validation. The fail-open versus strict choice is this lab’s explicit relying-party policy.',
       '&ldquo;Tamper&rdquo; appends a marker to a signed field after issuance. That is a deliberately obvious modification; the point being demonstrated is that <em>any</em> change to signed bytes breaks the signature, not that this particular change is realistic.',
       'ML-DSA signature and key sizes in Exhibit 6 are FIPS 204 reference figures, not measured — WebCrypto cannot generate ML-DSA keys. The classical P-256 bar <em>is</em> measured from this lab&rsquo;s live chain.',
     ],
@@ -611,6 +634,8 @@ function labIsPristine(state: AppState): boolean {
     state.tamperedNodes.size === 0 &&
     !state.revokeViaCrl &&
     !state.revokeViaOcsp &&
+    state.revocationPolicy === 'allow-unknown' &&
+    state.ocspScenario === 'none' &&
     state.compromisedCa === null &&
     state.trustContext === 'browser' &&
     state.pqMode === 'classical' &&
@@ -633,14 +658,21 @@ function exhibitsMarkup(state: AppState): string {
   // sighted one.
   const validationSteps = state.validation?.steps ?? [];
   const failedChecks = validationSteps.filter((step) => !step.ok);
+  const inconclusive = validationSteps.filter((step) =>
+    ['missing', 'unknown', 'stale', 'unauthorized'].includes(step.evidence));
+  const evidenceNote = inconclusive.length
+    ? `${inconclusive.length} revocation evidence gap${inconclusive.length === 1 ? '' : 's'} (${inconclusive.map((step) => step.evidence).join(', ')}).`
+    : '';
   const overallText =
     validationSteps.length === 0
       ? 'Overall: not yet validated.'
       : failedChecks.length === 0
-        ? `Overall: PASS — all ${validationSteps.length} checks passed.`
+        ? inconclusive.length
+          ? `Overall: ACCEPTED under ${state.revocationPolicy === 'allow-unknown' ? 'fail-open' : 'strict'} policy — ${validationSteps.length - inconclusive.length} checks passed; ${evidenceNote}`
+          : `Overall: PASS — all ${validationSteps.length} checks passed.`
         : `Overall: FAIL — ${failedChecks.length} of ${validationSteps.length} checks failed: ${failedChecks
             .map((step) => step.label)
-            .join(', ')}.`;
+            .join(', ')}.${evidenceNote ? ` ${evidenceNote}` : ''}`;
 
   const tamperLabel = (node: CertNode, name: string): string =>
     state.tamperedNodes.has(node) ? `Repair ${name}` : `Tamper ${name}`;
@@ -694,7 +726,7 @@ function exhibitsMarkup(state: AppState): string {
         </dl>
       </div>
       ${signVerifyMarkup(state)}
-      <p class="incident-note"><strong>Encoding note:</strong> these are not real X.509 certificates. A certificate here is a JavaScript object, and the bytes that get signed are its <code>JSON.stringify</code> serialization &mdash; there is no ASN.1 or DER anywhere in this lab. Every field, relationship, and check you see is faithful to RFC 5280; the wire format is not. <a href="#scope">What that leaves out &rarr;</a></p>
+      <p class="incident-note"><strong>Encoding note:</strong> these are not real X.509 certificates. A certificate here is a JavaScript object, and the bytes that get signed are its <code>JSON.stringify</code> serialization &mdash; there is no ASN.1 or DER anywhere in this lab. It exercises selected RFC 5280 concepts, not complete path validation. <a href="#scope">What that leaves out &rarr;</a></p>
       <p class="teach"><strong>How trust flows:</strong> each certificate carries the <em>subject</em>&rsquo;s public key, signed by its <em>issuer</em>&rsquo;s private key. The Root signs itself; it signs the Intermediate; the Intermediate signs the Leaf. Trust an anchor and you transitively trust everything it vouches for &mdash; until one signature fails to verify.</p>
     </section>
 
@@ -711,7 +743,22 @@ function exhibitsMarkup(state: AppState): string {
         <legend class="sr-only">Revocation simulation</legend>
         <label><input id="toggle-crl" type="checkbox" ${state.revokeViaCrl ? 'checked' : ''} /> Simulate CRL revocation</label>
         <label><input id="toggle-ocsp" type="checkbox" ${state.revokeViaOcsp ? 'checked' : ''} /> Simulate OCSP revoked</label>
+        <label>OCSP evidence
+          <select id="ocsp-scenario">
+            <option value="none"${state.ocspScenario === 'none' ? ' selected' : ''}>No response</option>
+            <option value="current-good"${state.ocspScenario === 'current-good' ? ' selected' : ''}>Issuer-signed current good</option>
+            <option value="stale-good"${state.ocspScenario === 'stale-good' ? ' selected' : ''}>Issuer-signed but stale good</option>
+            <option value="wrong-signer"${state.ocspScenario === 'wrong-signer' ? ' selected' : ''}>Wrong signer</option>
+          </select>
+        </label>
+        <label>Revocation policy
+          <select id="revocation-policy">
+            <option value="allow-unknown"${state.revocationPolicy === 'allow-unknown' ? ' selected' : ''}>Fail open (accept unknown)</option>
+            <option value="require-current-good"${state.revocationPolicy === 'require-current-good' ? ' selected' : ''}>Require current good evidence</option>
+          </select>
+        </label>
       </fieldset>
+      <p class="incident-note"><strong>Revocation evidence:</strong> a signature authenticates a response but does not keep it fresh. Compare current good with signed-but-stale, then change policy. An RFC 6960 <code>unknown</code> status is not <code>good</code>; missing evidence is a separate case. This toy uses directly issuer-signed JSON, not OCSP wire messages or a complete TLS revocation policy. Source: <a href="https://www.rfc-editor.org/rfc/rfc6960#section-2.2" target="_blank" rel="noopener noreferrer">RFC 6960 §§2.2, 2.4, 4.2.2.1–4.2.2.2 (June 2013)</a>.</p>
       <ul class="step-list" aria-label="Validation steps" role="list">
         ${(state.validation?.steps ?? [])
           .map((step) => {
@@ -720,11 +767,13 @@ function exhibitsMarkup(state: AppState): string {
             );
             const anchorId = stepNode ? ` id="step-${stepNode}"` : '';
             const flipped = stepNode && state.tamperedNodes.has(stepNode) && !step.ok ? ' flipped' : '';
-            return `<li${anchorId} class="${step.ok ? 'pass' : 'fail'}${flipped}" aria-label="${step.label}: ${step.ok ? 'passed' : 'failed'}${flipped ? ', broken by tamper' : ''}"><strong>${step.label}:</strong> ${step.details}</li>`;
+            const displayState = step.evidence === 'passed' || step.evidence === 'good' ? 'pass'
+              : step.evidence === 'failed' || step.evidence === 'revoked' || step.evidence === 'unauthorized' ? 'fail' : 'unknown';
+            return `<li${anchorId} class="${displayState}${flipped}" data-accepted="${step.ok}" data-evidence="${step.evidence}" aria-label="${step.label}: ${step.evidence}${flipped ? ', broken by tamper' : ''}"><strong>${step.label}:</strong> ${step.details}</li>`;
           })
           .join('')}
       </ul>
-      <p class="status ${state.validation?.ok ? 'pass' : 'fail'}" role="status" aria-live="polite">${overallText}</p>
+      <p class="status ${state.validation?.ok ? inconclusive.length ? 'unknown' : 'pass' : 'fail'}" role="status" aria-live="polite">${overallText}</p>
       ${tamperCouplingMarkup(state)}
       <p class="teach"><strong>Try it:</strong> a signature covers the exact bytes of the fields it signs. <em>Tamper</em> any certificate &mdash; this flips one signed field <em>after</em> issuance &mdash; and that link&rsquo;s signature check fails immediately, because the issuer never signed the altered bytes. The panel above shows the exact bytes that changed and links to the specific check they broke. Click again to <em>repair</em> and watch it pass. This is why an attacker cannot edit a certificate without the issuer&rsquo;s private key.</p>
     </section>
@@ -838,6 +887,8 @@ async function resetLab(state: AppState): Promise<void> {
   state.tamperedNodes.clear();
   state.revokeViaCrl = false;
   state.revokeViaOcsp = false;
+  state.revocationPolicy = 'allow-unknown';
+  state.ocspScenario = 'none';
   state.compromisedCa = null;
   state.trustContext = 'browser';
   state.pqMode = 'classical';
@@ -898,6 +949,18 @@ function bindEvents(state: AppState): void {
   document.querySelector<HTMLInputElement>('#toggle-ocsp')?.addEventListener('change', async (event) => {
     const input = event.target as HTMLInputElement;
     state.revokeViaOcsp = input.checked;
+    await recomputeValidation(state);
+    render(state);
+  });
+
+  document.querySelector<HTMLSelectElement>('#ocsp-scenario')?.addEventListener('change', async (event) => {
+    state.ocspScenario = (event.target as HTMLSelectElement).value as OcspScenario;
+    await recomputeValidation(state);
+    render(state);
+  });
+
+  document.querySelector<HTMLSelectElement>('#revocation-policy')?.addEventListener('change', async (event) => {
+    state.revocationPolicy = (event.target as HTMLSelectElement).value as RevocationPolicy;
     await recomputeValidation(state);
     render(state);
   });
@@ -1031,6 +1094,8 @@ async function init(): Promise<void> {
     tamperedNodes: new Set<CertNode>(),
     revokeViaCrl: false,
     revokeViaOcsp: false,
+    revocationPolicy: 'allow-unknown',
+    ocspScenario: 'none',
     compromisedCa: null,
     ctLog: await createCtLog(),
     ctTree: null,
