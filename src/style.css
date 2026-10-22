@@ -1044,7 +1044,7 @@ input:focus-visible {
 #exhibit-2 select {
   max-width: 100%;
   min-height: 44px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent-ink);
   border-radius: 0.5rem;
   background: var(--surface);
   color: var(--text);
