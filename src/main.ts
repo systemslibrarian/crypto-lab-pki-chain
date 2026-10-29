@@ -520,7 +520,7 @@ function merkleTreeMarkup(state: AppState): string {
 
           // Leaf nodes are buttons so the learner can pick which leaf to prove.
           if (node.isLeaf) {
-            return `<button type="button" class="${classes}" data-leaf-index="${node.span[0]}" aria-pressed="${isTarget}" aria-label="${roleLabel}${proofRole}, hash ${shortHex(node.hash, 6)}">
+            return `<button type="button" class="${classes}" data-leaf-index="${node.span[0]}" aria-pressed="${isTarget}" aria-label="L${node.span[0]} ${shortHex(node.hash, 5)}: ${roleLabel}${proofRole}, hash ${shortHex(node.hash, 6)}">
               <span class="mtree-tag">L${node.span[0]}</span>
               <span class="mtree-hash mono">${shortHex(node.hash, 5)}</span>
             </button>`;
@@ -680,7 +680,7 @@ function exhibitsMarkup(state: AppState): string {
   return `
     <header class="cl-hero panel">
       <div class="hero-actions">
-        <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset all lab scenarios to defaults"${labIsPristine(state) ? ' disabled' : ''}>Reset lab</button>
+        <button id="reset-lab" class="btn ghost" type="button" aria-label="Reset lab: all scenarios back to defaults"${labIsPristine(state) ? ' disabled' : ''}>Reset lab</button>
       </div>
       <div class="cl-hero-main">
         <h1 class="cl-hero-title">PKI Chain</h1>
