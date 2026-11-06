@@ -208,7 +208,7 @@ function pqProfiles(state: AppState): PqProfile[] {
       sigBytes: classicalSig + mldsaSig,
       keyBytes: classicalKey + mldsaKey,
       measured: false,
-      note: 'The expected migration path: a relying party that trusts either algorithm stays secure. Carries both signatures, so it is the largest — but it is safe even if one scheme is later broken.',
+      note: 'Conceptual dual-signature footprint, not a generated hybrid certificate. Requiring BOTH signatures (AND), bound to the same message, identity and keys, can preserve authentication if one scheme is broken and the other remains secure. Accepting EITHER signature (OR) permits a forgery through the broken scheme.',
     },
   ];
 }
@@ -853,6 +853,7 @@ function exhibitsMarkup(state: AppState): string {
       <p><strong>Signature footprint:</strong> ${activePq.sigBytes.toLocaleString()} bytes${activePq.measured ? ' (measured live)' : ' (FIPS 204 reference)'}</p>
       <p><strong>Public key footprint:</strong> ${activePq.keyBytes.toLocaleString()} bytes</p>
       <p>${activePq.note}</p>
+      <p class="incident-note"><strong>Verification policy matters:</strong> if an attacker forges the classical signature but cannot forge ML-DSA, AND rejects the forged object; OR accepts it. This is a conceptual case, not a live hybrid verifier. A mixed chain uses different algorithms at different levels: a PQ root alone does not protect classical lower links. <a href="https://eprint.iacr.org/2021/1447">Mixed-chain migration research</a>.</p>
       <p class="incident-note">Compatibility note: browsers currently validate classical WebPKI signatures; PQ rollouts are expected to use hybrid certificates first. ML-DSA sizes are FIPS 204 reference values — WebCrypto cannot yet generate them.</p>
     </section>
 
