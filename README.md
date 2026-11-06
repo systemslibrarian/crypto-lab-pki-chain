@@ -103,3 +103,7 @@ A cryptography lab should prove its own crypto, so the math is covered by an exe
 The workflow retains its full type, unit, build and browser gates. A successful
 request is not evidence of publication; inspect the run and actual public site.
 Failed requests retain their nonzero exit status.
+
+## Research scope review — November 2026
+
+CL3114: The PQ size comparison is conceptual. Robust dual-signature authentication requires AND verification with message/identity/key binding; OR acceptance fails through a broken component. Mixed certificate chains are a different migration mechanism. Source: https://eprint.iacr.org/2021/1447 (pp. 1–4).
