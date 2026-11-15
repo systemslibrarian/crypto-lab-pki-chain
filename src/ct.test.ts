@@ -99,6 +99,46 @@ describe('CT consistency proofs (RFC 6962)', () => {
   });
 });
 
+describe('what the proofs do NOT catch: a split view (RFC 6962 §5, §7.3)', () => {
+  it('hands each observer proofs that verify, so only comparing tree heads catches it', async () => {
+    // A log that keeps two histories rewrites nothing inside either one, so
+    // every proof it issues from either view verifies. The page used to say a
+    // log "cannot hide a certificate or fork its view without producing a
+    // proof that fails to verify"; this is the counter-example.
+    const certs = await makeCerts(5);
+    const shared = certs.slice(0, 3);
+
+    const viewA = await createCtLog();
+    const viewB = await createCtLog();
+    for (const cert of shared) {
+      await viewA.submitCertificate(cert);
+      await viewB.submitCertificate(cert);
+    }
+    // Up to the fork point the two views are indistinguishable.
+    const anchor = await viewA.rootHash(3);
+    expect(await viewB.rootHash(3)).toBe(anchor);
+
+    // Now they diverge: each observer is shown a different fourth entry.
+    await viewA.submitCertificate(certs[3]);
+    await viewB.submitCertificate(certs[4]);
+
+    for (const view of [viewA, viewB]) {
+      // Inclusion of the entry that observer was shown: verifies.
+      const inclusion = await view.generateInclusionProof(3);
+      expect(await view.verifyInclusionProof(inclusion)).toBe(true);
+      // Append-only against the head it anchored before the fork: verifies.
+      const consistency = await view.generateConsistencyProof(3, 4);
+      expect(await view.verifyConsistencyProof(consistency)).toBe(true);
+      expect(consistency.oldRoot).toBe(anchor);
+    }
+
+    // Nothing local detected the fork. The two signed tree heads for the same
+    // tree size differ, and that comparison — between observers — is the whole
+    // detection mechanism.
+    expect(await viewA.rootHash(4)).not.toBe(await viewB.rootHash(4));
+  });
+});
+
 describe('CT drawable tree layout (Exhibit 5 visualization)', () => {
   it('treeLayout root hash equals the log root and spans the whole leaf set', async () => {
     for (let n = 1; n <= 8; n += 1) {
