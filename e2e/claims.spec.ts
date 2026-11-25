@@ -385,7 +385,20 @@ test('CA compromise drops trust down the subtree while the signatures stay valid
 
   await page.locator('[data-compromise="none"]').click();
   table = await compromiseTable(page);
-  expect(table.every((r) => r.trust.includes('trusted'))).toBe(true);
+  expect(table.every((r) => r.trust.includes('Outside the marked subtree'))).toBe(true);
+});
+
+test('the marked subtree stays separate from the selected trust store', async ({ page }) => {
+  await open(page);
+  await page.locator('[data-context="os"]').click();
+  await expect(page.locator('#exhibit-3 strong.fail')).toHaveText('Rejected');
+  await expect(page.locator('.subtree-list li')).toHaveText(['None']);
+  const table = await compromiseTable(page);
+  expect(table.every(row => row.trust.includes('Outside the marked subtree'))).toBe(true);
+  await expect(page.locator('.compromise-contrast')).not.toContainText('all links are trusted');
+  await page.locator('[data-compromise="intermediate"]').click();
+  await expect(page.locator('.subtree-list li')).toHaveCount(2);
+  await expect(page.locator('#exhibit-3 strong.fail')).toHaveText('Rejected');
 });
 
 test('regression: Exhibit 4 must not claim a tampered signature verifies', async ({ page }) => {
@@ -410,6 +423,8 @@ test('regression: Exhibit 4 must not claim a tampered signature verifies', async
   const contrast = (await page.locator('.compromise-contrast').textContent()) ?? '';
   expect(contrast).not.toContain('every signature still verifies');
   expect(contrast).toContain('Both failure modes');
+  expect(contrast).toContain('including any with a failed signature');
+  expect(contrast).not.toContain('have perfectly valid signatures');
 
   await expectSurfacesAgree(page);
 });
@@ -449,7 +464,7 @@ test('Exhibit 4 reads honestly in all four tamper x compromise states', async ({
   expect((await compromiseTable(page)).every((r) => r.sig.includes('signature verifies'))).toBe(
     true,
   );
-  await expect(contrast).toContainText('all signatures verify and all links are trusted');
+  await expect(contrast).toContainText('All three signatures verify. No CA is marked as compromised');
   await expect(contrast).not.toHaveClass(/is-compromise/);
   await expectProseMatchesTable();
 
@@ -457,10 +472,10 @@ test('Exhibit 4 reads honestly in all four tamper x compromise states', async ({
   await tamper.click();
   let rows = await compromiseTable(page);
   expect(rows.find((r) => r.link === 'Leaf')!.sig).toContain('signature fails');
-  expect(rows.every((r) => r.trust.includes('trusted') && !r.trust.includes('distrusted'))).toBe(
+  expect(rows.every((r) => r.trust.includes('Outside the marked subtree'))).toBe(
     true,
   );
-  await expect(contrast).toContainText('No CA is compromised');
+  await expect(contrast).toContainText('No CA is marked as compromised');
   await expect(contrast).toContainText('signature fails');
   await expectProseMatchesTable();
 

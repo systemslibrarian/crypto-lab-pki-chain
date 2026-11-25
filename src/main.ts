@@ -377,7 +377,7 @@ function compromiseLinksMarkup(state: AppState): string {
         <tr class="${distrusted ? 'row-distrusted' : ''}">
           <th scope="row">${NODE_NAME[node]}</th>
           <td class="${verifies ? 'pass' : 'fail'}"><span aria-hidden="true">${verifies ? '✓' : '✗'}</span> ${verifies ? 'signature verifies' : 'signature fails'}</td>
-          <td class="${distrusted ? 'fail' : 'pass'}"><span aria-hidden="true">${distrusted ? '✗' : '✓'}</span> ${distrusted ? 'distrusted by policy' : 'trusted'}</td>
+          <td class="${distrusted ? 'fail' : ''}"><span aria-hidden="true">${distrusted ? '✗' : '–'}</span> ${distrusted ? 'distrusted due to CA compromise' : 'Outside the marked subtree'}</td>
         </tr>`;
     })
     .join('');
@@ -390,26 +390,26 @@ function compromiseLinksMarkup(state: AppState): string {
   let contrast: string;
   if (anyCompromise && allSignaturesVerify) {
     contrast =
-      'Note the split: every <strong>signature still verifies</strong> — the math is untouched — yet the affected links are <strong>distrusted by policy</strong>. That is the opposite of Exhibit 2, where tampering makes a signature genuinely <em>fail</em>. Compromise revokes <em>trust</em>; tamper breaks the <em>math</em>.';
+      'In this chain every <strong>signature still verifies</strong>. The marked CA and its descendants are distrusted because the CA is compromised.';
   } else if (anyCompromise) {
     contrast =
-      'Both failure modes are running at once. The link marked <strong>signature fails</strong> is broken by the tamper in Exhibit 2 — that is the <em>math</em> failing. The links marked <strong>distrusted by policy</strong> have perfectly valid signatures and are rejected by <em>decision</em> alone. Repair the tamper to see compromise on its own.';
+      'Both failure modes are running at once. A row marked <strong>signature fails</strong> has an invalid signature. CA compromise also affects each link in the marked subtree, including any with a failed signature.';
   } else if (allSignaturesVerify) {
     contrast =
-      'Right now all signatures verify and all links are trusted. Compromise a CA above and watch trust drop while the signatures stay valid.';
+      'All three signatures verify. No CA is marked as compromised. Exhibit 3 shows the chain decision for the selected trust store.';
   } else {
     contrast =
-      'No CA is compromised, so every link is still trusted by policy — but the tampered link&rsquo;s <strong>signature fails</strong>. That is the math breaking, not a trust decision. Compromise a CA above to see the other half of the contrast.';
+      'No CA is marked as compromised. Each row marked <strong>signature fails</strong> identifies a certificate whose signed contents changed.';
   }
 
   return `
     <div class="compromise-table-wrap" tabindex="0" role="region" aria-label="Signature and trust comparison (scrollable)">
-    <table class="compromise-table" aria-label="Signature validity versus policy trust per link">
+    <table class="compromise-table" aria-label="Signature validity and CA compromise by link">
       <thead>
         <tr>
           <th scope="col">Link</th>
           <th scope="col">Cryptographic signature</th>
-          <th scope="col">Trust decision</th>
+          <th scope="col">Effect of CA compromise</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
@@ -805,11 +805,10 @@ function exhibitsMarkup(state: AppState): string {
         <button class="tab ${state.compromisedCa === 'intermediate' ? 'active' : ''}" data-compromise="intermediate" type="button" role="tab" aria-selected="${state.compromisedCa === 'intermediate'}">Intermediate Compromised</button>
         <button class="tab ${state.compromisedCa === 'root' ? 'active' : ''}" data-compromise="root" type="button" role="tab" aria-selected="${state.compromisedCa === 'root'}">Root Compromised</button>
       </div>
-      <p>Untrusted subtree:</p>
+      <p>Certificates in the marked subtree:</p>
       <ul class="subtree-list" aria-live="polite">
-        <li class="${compromiseSet.has(state.chain.root.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.root.cert.subject)}</li>
-        <li class="${compromiseSet.has(state.chain.intermediate.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.intermediate.cert.subject)}</li>
-        <li class="${compromiseSet.has(state.chain.leaf.cert.subject) ? 'fail' : 'pass'}">${shortSubject(state.chain.leaf.cert.subject)}</li>
+        ${compromiseSet.size === 0 ? '<li>None</li>' : Array.from(compromiseSet, subject =>
+          `<li class="fail">${escapeHtml(shortSubject(subject))}</li>`).join('')}
       </ul>
       ${compromiseLinksMarkup(state)}
       <div id="sibling-mount"></div>
