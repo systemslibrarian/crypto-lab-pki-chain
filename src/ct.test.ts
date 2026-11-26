@@ -1,15 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { createCtLog } from './ct';
-import { createDemoChain, type Certificate } from './pki';
+import { createCtLog, issueLogCertificate } from './ct';
+import { createDemoChain, createTrustStore, validateChain, type Certificate } from './pki';
 
-/** Build N distinct certificates by varying one signed field (the serial). */
 async function makeCerts(count: number): Promise<Certificate[]> {
   const chain = await createDemoChain();
-  return Array.from({ length: count }, (_unused, index) => ({
-    ...chain.leaf.cert,
-    serialNumber: `${chain.leaf.cert.serialNumber}-${index}`,
-  }));
+  return Promise.all(Array.from({ length: count }, () => issueLogCertificate(chain)));
 }
+
+it('logs distinct serials carrying valid issuer signatures, including their signed DNS fields', async () => {
+  const chain = await createDemoChain();
+  chain.leaf.cert.dnsName = 'library.example';
+  const store = await createTrustStore(chain.root.cert);
+  const certs = await Promise.all([issueLogCertificate(chain), issueLogCertificate(chain)]);
+  expect(certs[0].serialNumber).not.toBe(certs[1].serialNumber);
+  const log = await createCtLog();
+  for (const cert of certs) {
+    const result = await validateChain({ ...chain, leaf: { ...chain.leaf, cert } }, store);
+    expect(result.steps.find(step => step.label === 'Leaf signature')?.ok).toBe(true);
+    expect(cert.dnsName).toBe('library.example');
+    const receipt = await log.submitCertificate(cert);
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      subject: cert.subject, issuer: cert.issuer, publicKey: cert.publicKey,
+      validFrom: cert.validFrom, validTo: cert.validTo, serialNumber: cert.serialNumber,
+      dnsName: cert.dnsName, permittedDnsSuffix: cert.permittedDnsSuffix,
+      signature: Array.from(new Uint8Array(cert.signature), byte => byte.toString(16).padStart(2, '0')).join(''),
+    }));
+    const leafInput = new Uint8Array(bytes.length + 1);
+    leafInput.set(bytes, 1);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', leafInput));
+    expect(receipt.entryHash).toBe(Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join(''));
+  }
+});
 
 /** Flip the first hex nibble so the value always changes, staying valid hex. */
 function corrupt(hex: string): string {

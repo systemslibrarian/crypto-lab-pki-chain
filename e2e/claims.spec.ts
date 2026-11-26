@@ -587,7 +587,8 @@ test('regression: Reset lab is reachable after any change, and restores everythi
   await expect(page.locator('#revocation-policy')).toHaveValue('allow-unknown');
   await expect(page.locator('[data-compromise="none"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-context="browser"]')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#exhibit-5 .status')).toContainText('No suspicious issuance observed');
+  await expect(page.locator('#exhibit-5 .status')).toContainText('No monitor check run');
+  await expect(page.locator('#exhibit-5 .status')).toHaveClass(/unknown/);
   await expect(reset).toBeDisabled();
 });
 

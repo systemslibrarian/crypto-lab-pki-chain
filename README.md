@@ -28,7 +28,9 @@ The demo provides six interactive exhibits:
 
 A **Reset lab** button restores every scenario to its defaults, and **CRL** / **OCSP** checkboxes simulate leaf revocation. Exhibit 2 also compares no response, current issuer-signed good responses, an authentic but stale leaf response, and a response signed by the wrong key. The signatures cover fixed-order JSON using WebCrypto ECDSA P-256; these are not RFC 6960 DER messages or a production OCSP client. The response scenario covers both leaf and intermediate certificates; the CRL and revoked status checkboxes remain unsigned teaching inputs. The default fail-open choice illustrates acceptance without positive evidence, not verified non-revocation.
 
-The Merkle log is implemented to RFC 6962 exactly — leaves prefixed with `0x00`, interior nodes with `0x01`, and trees split at the largest power of two with no lone-node duplication — so inclusion and consistency proofs are the same compact `O(log n)` artifacts a real CT log produces, not a recomputation over the whole log.
+Ordinary submissions issue a new serial and sign it with the demo intermediate CA. An inclusion proof covers the submitted JSON entry. Verifying that proof alone does not validate the certificate or its issuer. The separate monitor checks for an unexpected issuer name.
+
+The Merkle tree hashing follows RFC 6962 §2.1 — leaves prefixed with `0x00`, interior nodes with `0x01`, and trees split at the largest power of two with no lone-node duplication — so inclusion and consistency proofs are the same compact `O(log n)` artifacts a real CT log produces, not a recomputation over the whole log.
 
 ## What Can Go Wrong
 

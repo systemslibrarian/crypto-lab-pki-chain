@@ -2,6 +2,7 @@ import { siblingsView } from './siblings-view';
 import './style.css';
 import {
   createCtLog,
+  issueLogCertificate,
   nodeKey,
   type CtLog,
   type InclusionProof,
@@ -818,7 +819,7 @@ function exhibitsMarkup(state: AppState): string {
 
     <section class="panel exhibit" id="exhibit-5" aria-labelledby="ex5-heading">
       <h2 id="ex5-heading">Exhibit 5 &mdash; Certificate Transparency</h2>
-      <p class="caption">Submit certificates to a simulated append-only log, mint SCTs, verify inclusion, and catch misissuance.</p>
+      <p class="caption">Submit a certificate signed by the demo intermediate CA, inspect its log receipt, and verify its inclusion. The monitor compares issuer names. A valid inclusion proof establishes only that the entry is in this log.</p>
       <div class="control-row">
         <button id="ct-submit" class="btn" type="button">Submit Certificate to CT Log</button>
         <button id="ct-proof" class="btn ghost" type="button" ${state.ctLog.size < 1 ? 'disabled' : ''}>Inclusion Proof</button>
@@ -831,7 +832,7 @@ function exhibitsMarkup(state: AppState): string {
         ${merkleTreeMarkup(state)}
       </div>
       <p>Consistency proof: ${state.latestConsistency ? `old=${state.latestConsistency.oldSize} &rarr; new=${state.latestConsistency.newSize}, path=${state.latestConsistency.proof.length} hash${state.latestConsistency.proof.length === 1 ? '' : 'es'}, verify=<strong class="${state.latestConsistencyValid ? 'pass' : 'fail'}">${state.latestConsistencyValid ? 'true' : 'false'}</strong>` : 'Not generated.'}</p>
-      <p class="status ${state.misissuance?.suspicious ? 'fail' : 'pass'}" role="status" aria-live="polite">Misissuance monitor: ${state.misissuance ? state.misissuance.reason : 'No suspicious issuance observed.'}</p>
+      <p class="status ${state.misissuance ? (state.misissuance.suspicious ? 'fail' : 'pass') : 'unknown'}" role="status" aria-live="polite">Misissuance monitor: ${state.misissuance ? state.misissuance.reason : 'No monitor check run.'}</p>
       <p class="teach"><strong>What the proofs guarantee (RFC 6962):</strong> the <em>inclusion proof</em> shows your certificate is in the log using only ~log&#8322;(n) sibling hashes (highlighted above) &mdash; not the whole log. &ldquo;verify=true&rdquo; literally means <em>these two root hashes match</em>: the root you rebuild from the leaf plus those few siblings equals the root the log already published. The <em>consistency proof</em> shows the new tree only <em>appended</em> to the old one and rewrote no history, again with a handful of hashes. Together they make two kinds of misbehaviour detectable: a log cannot deny that a certificate it issued an SCT for is in the tree, and it cannot rewrite a history a client has already anchored. A <em>split view</em> is the kind they do not catch &mdash; a log keeping two histories hands each client proofs that <em>do</em> verify, because within each view nothing was rewritten. That one is caught by comparing signed tree heads between observers: two conflicting tree heads for the same log are themselves the proof of misbehaviour (RFC 6962 &sect;5 and &sect;7.3). See <a href="https://systemslibrarian.github.io/crypto-lab-key-mirror/" target="_blank" rel="noopener noreferrer">Key Mirror</a> for a consistency proof passing across a fork.</p>
     </section>
 
@@ -982,13 +983,11 @@ function bindEvents(state: AppState): void {
   });
 
   document.querySelector<HTMLButtonElement>('#ct-submit')?.addEventListener('click', async () => {
-    // Each submission is a distinct certificate (unique serial), so the log grows
-    // with distinct leaves and the drawn tree is a real, non-degenerate Merkle tree.
-    const entry: Certificate = {
-      ...state.chain.leaf.cert,
-      serialNumber: `${state.chain.leaf.cert.serialNumber}-${state.ctLog.size}`,
-    };
-    state.latestSct = await state.ctLog.submitCertificate(entry);
+    const log = state.ctLog;
+    const entry = await issueLogCertificate(state.chain);
+    const sct = await log.submitCertificate(entry);
+    if (state.ctLog !== log) return;
+    state.latestSct = sct;
     state.latestProof = null;
     state.latestConsistency = null;
     state.proofTarget = state.ctLog.size - 1;

@@ -1,4 +1,4 @@
-import type { Certificate } from './pki';
+import { createCertificate, type Certificate, type CertificateChain } from './pki';
 
 export interface CtLeaf {
   certificate: Certificate;
@@ -112,6 +112,19 @@ async function sha256Hex(data: Uint8Array): Promise<string> {
   return toHex(digest);
 }
 
+export async function issueLogCertificate({ leaf, intermediate }: CertificateChain): Promise<Certificate> {
+  // The new serial must be part of the data signed by the issuer.
+  return createCertificate(
+    leaf.cert.subject,
+    intermediate.cert.subject,
+    leaf.keyPair.publicKey,
+    intermediate.keyPair.privateKey,
+    new Date(leaf.cert.validFrom),
+    new Date(leaf.cert.validTo),
+    { dnsName: leaf.cert.dnsName, permittedDnsSuffix: leaf.cert.permittedDnsSuffix },
+  );
+}
+
 function certCanonicalBytes(certificate: Certificate): Uint8Array {
   const payload = JSON.stringify({
     subject: certificate.subject,
@@ -120,6 +133,8 @@ function certCanonicalBytes(certificate: Certificate): Uint8Array {
     validFrom: certificate.validFrom,
     validTo: certificate.validTo,
     serialNumber: certificate.serialNumber,
+    dnsName: certificate.dnsName,
+    permittedDnsSuffix: certificate.permittedDnsSuffix,
     signature: toHex(certificate.signature),
   });
 
